@@ -16,7 +16,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class LiveCopilotEngine(
-    private val cryptoManager: CryptoPreferencesManager
+    private val cryptoManager: CryptoPreferencesManager,
+    private val strategyEngine: StrategyEngine = StrategyEngine()
 ) {
     companion object {
         private const val TAG = "LiveCopilotEngine"
@@ -39,17 +40,26 @@ class LiveCopilotEngine(
         val isAiEnabled = cryptoManager.isAiAnalysisEnabled
 
         if (!isAiEnabled) {
-            return@withContext defaultPassiveResult()
+            return@withContext defaultPassiveResult(caller, transcriptHistory, latestUtterance, knownClaims, knownMemories, objective)
         }
 
         if (latestUtterance == null && transcriptHistory.isEmpty()) {
+            val initialStrategies = strategyEngine.evaluateStrategies(
+                caller = caller,
+                transcriptHistory = emptyList(),
+                latestUtterance = null,
+                knownClaims = knownClaims,
+                knownMemories = knownMemories,
+                objective = objective
+            )
             return@withContext CopilotAnalysisResult(
-                recommendedStrategy = StrategyType.DIRECT_RESPONSE,
+                recommendedStrategy = StrategyType.COGNITIVE_PROBE,
                 tone = ToneType.CALM,
                 confidence = 80,
                 suggestedResponse = "Awaiting speech to generate live tactical response...",
                 reason = "Call connected. Listening for conversational context.",
-                alternatives = emptyList(),
+                strategies = initialStrategies,
+                alternatives = initialStrategies.map { StrategyAlternative(it.type, it.suggestedResponse, it.tone) },
                 liveSignals = LiveSignalMeters(0.1f, 0.1f, 0.1f),
                 deceptionSignal = DeceptionSignalState(score = 0, isElevated = false, contributors = emptyList(), whyExplanation = "Awaiting speech"),
                 inconsistencyAlert = null,
@@ -124,18 +134,43 @@ class LiveCopilotEngine(
         }
 
         val systemPrompt = """
-            You are REALITY ENGINE, an ultra-precise tactical live conversation co-pilot.
+            You are REALITY ENGINE, an ultra-precise tactical live conversation co-pilot and strategy engine.
             Analyze the real-time ongoing conversation and return ONLY valid JSON matching this schema:
             {
-              "recommended_strategy": "COGNITIVE PROBE" | "MIRRORING" | "PIVOT" | "BONDING" | "CLARIFY" | "CONFRONT" | "VALIDATE" | "CHALLENGE" | "DE-ESCALATE" | "ASSERTIVE" | "DIRECT RESPONSE",
+              "recommended_strategy": "COGNITIVE PROBE" | "MIRROR" | "PIVOT" | "BONDING" | "CLARIFY" | "TIMELINE" | "SUMMARIZE",
               "tone": "CALM · CURIOUS" | "CALM" | "CURIOUS" | "WARM" | "NEUTRAL" | "DIRECT" | "ASSERTIVE" | "DIPLOMATIC" | "EMPATHETIC" | "PROFESSIONAL",
               "confidence": 85,
               "suggested_response": "Exact words the user should speak right now.",
               "reason": "Tactical justification for this response.",
-              "alternatives": [
-                {"strategy": "MIRRORING", "suggested_response": "...", "tone": "CALM"},
-                {"strategy": "PIVOT", "suggested_response": "...", "tone": "DIPLOMATIC"},
-                {"strategy": "BONDING", "suggested_response": "...", "tone": "WARM"}
+              "strategies": [
+                {
+                  "type": "BONDING",
+                  "suggested_response": "...",
+                  "reason": "...",
+                  "confidence": 84,
+                  "tone": "WARM"
+                },
+                {
+                  "type": "COGNITIVE PROBE",
+                  "suggested_response": "...",
+                  "reason": "...",
+                  "confidence": 90,
+                  "tone": "CURIOUS"
+                },
+                {
+                  "type": "MIRROR",
+                  "suggested_response": "...",
+                  "reason": "...",
+                  "confidence": 82,
+                  "tone": "CALM"
+                },
+                {
+                  "type": "PIVOT",
+                  "suggested_response": "...",
+                  "reason": "...",
+                  "confidence": 86,
+                  "tone": "DIPLOMATIC"
+                }
               ],
               "signals": {
                 "linguistic": 0.25,
@@ -162,6 +197,7 @@ class LiveCopilotEngine(
                 "suggested_state": "OBSERVED"
               }
             }
+            Ensure ALL FOUR primary strategies (BONDING, COGNITIVE PROBE, MIRROR, PIVOT) are included in the strategies array with actionable contextual phrases.
             Do not include markdown or backticks. Return raw JSON.
         """.trimIndent()
 
@@ -199,44 +235,33 @@ class LiveCopilotEngine(
         if (choices.length() == 0) return@withContext null
         val content = choices.getJSONObject(0).getJSONObject("message").getString("content")
 
-        parseCopilotJson(content)
+        parseCopilotJson(content, caller, transcript, latestUtterance, knownClaims, knownMemories, objective)
     }
 
-    private fun parseCopilotJson(jsonStr: String): CopilotAnalysisResult? {
+    private fun parseCopilotJson(
+        jsonStr: String,
+        caller: PersonEntity?,
+        transcript: List<TranscriptSegment>,
+        latestUtterance: TranscriptSegment?,
+        knownClaims: List<ClaimEntity>,
+        knownMemories: List<MemoryEntity>,
+        objective: String
+    ): CopilotAnalysisResult? {
         return try {
             val json = JSONObject(jsonStr)
             val stratName = json.optString("recommended_strategy", "COGNITIVE PROBE")
-            val strat = StrategyType.entries.firstOrNull { it.displayName.equals(stratName, true) }
-                ?: StrategyType.COGNITIVE_PROBE
+            val strat = StrategyType.entries.firstOrNull {
+                it.displayName.equals(stratName, true) || it.name.equals(stratName, true)
+            } ?: StrategyType.COGNITIVE_PROBE
 
             val toneName = json.optString("tone", "CALM · CURIOUS")
-            val tone = ToneType.entries.firstOrNull { it.displayName.equals(toneName, true) }
-                ?: ToneType.CALM_CURIOUS
+            val tone = ToneType.entries.firstOrNull {
+                it.displayName.equals(toneName, true) || it.name.equals(toneName, true)
+            } ?: ToneType.CALM_CURIOUS
 
             val confidence = json.optInt("confidence", 84)
             val response = json.optString("suggested_response", "Can you tell me more about that?")
             val reason = json.optString("reason", "Maintains conversational flow.")
-
-            val altArray = json.optJSONArray("alternatives")
-            val alternatives = mutableListOf<StrategyAlternative>()
-            if (altArray != null) {
-                for (i in 0 until altArray.length()) {
-                    val item = altArray.getJSONObject(i)
-                    val sName = item.optString("strategy")
-                    val sType = StrategyType.entries.firstOrNull { it.displayName.equals(sName, true) }
-                        ?: StrategyType.MIRRORING
-                    val tName = item.optString("tone", "CALM")
-                    val tType = ToneType.entries.firstOrNull { it.displayName.equals(tName, true) }
-                        ?: ToneType.CALM
-                    alternatives.add(
-                        StrategyAlternative(
-                            strategy = sType,
-                            suggestedResponse = item.optString("suggested_response", ""),
-                            tone = tType
-                        )
-                    )
-                }
-            }
 
             val sigObj = json.optJSONObject("signals")
             val liveSignals = LiveSignalMeters(
@@ -287,12 +312,90 @@ class LiveCopilotEngine(
                 )
             } else null
 
+            // Parse strategies array
+            val parsedStrategies = mutableListOf<StrategyRecommendation>()
+            val stratArray = json.optJSONArray("strategies")
+            if (stratArray != null) {
+                for (i in 0 until stratArray.length()) {
+                    val item = stratArray.getJSONObject(i)
+                    val sName = item.optString("type", item.optString("strategy"))
+                    val sType = StrategyType.entries.firstOrNull {
+                        it.name.equals(sName, true) || it.displayName.equals(sName, true)
+                    } ?: StrategyType.COGNITIVE_PROBE
+                    val tName = item.optString("tone", "CALM")
+                    val tType = ToneType.entries.firstOrNull {
+                        it.name.equals(tName, true) || it.displayName.equals(tName, true)
+                    } ?: ToneType.CALM
+
+                    parsedStrategies.add(
+                        StrategyRecommendation(
+                            type = sType,
+                            name = sType.displayName,
+                            description = sType.description,
+                            purpose = sType.purpose,
+                            recommendationReason = item.optString("reason", sType.description),
+                            suggestedResponse = item.optString("suggested_response", ""),
+                            confidence = item.optInt("confidence", 80),
+                            tone = tType,
+                            isPrimaryRecommended = sType == strat,
+                            enabled = true
+                        )
+                    )
+                }
+            }
+
+            // Guarantee all 4 primary strategies are populated
+            val fallbackStrategies = strategyEngine.evaluateStrategies(
+                caller = caller,
+                transcriptHistory = transcript,
+                latestUtterance = latestUtterance,
+                knownClaims = knownClaims,
+                knownMemories = knownMemories,
+                objective = objective,
+                detectedInconsistency = inconsistencyAlert,
+                deceptionScore = decScore,
+                previousStrategy = strat
+            )
+
+            val finalStrategies = mutableListOf<StrategyRecommendation>()
+            val primaryEnums = StrategyRegistry.getAllPrimaryTypes().distinctBy { it.displayName }
+
+            for (primType in primaryEnums) {
+                val existing = parsedStrategies.firstOrNull {
+                    it.type.displayName.equals(primType.displayName, true)
+                }
+                if (existing != null && existing.suggestedResponse.isNotBlank()) {
+                    finalStrategies.add(existing.copy(isPrimaryRecommended = existing.type == strat))
+                } else {
+                    val fallback = fallbackStrategies.firstOrNull {
+                        it.type.displayName.equals(primType.displayName, true)
+                    }
+                    if (fallback != null) {
+                        finalStrategies.add(fallback.copy(isPrimaryRecommended = fallback.type == strat))
+                    }
+                }
+            }
+
+            // Include any additional contextual strategies (e.g. TIMELINE, CLARIFY)
+            fallbackStrategies.filter { it.type !in primaryEnums }.forEach { extra ->
+                finalStrategies.add(extra)
+            }
+
+            val alternatives = finalStrategies.map {
+                StrategyAlternative(
+                    strategy = it.type,
+                    suggestedResponse = it.suggestedResponse,
+                    tone = it.tone
+                )
+            }
+
             CopilotAnalysisResult(
                 recommendedStrategy = strat,
                 tone = tone,
                 confidence = confidence,
                 suggestedResponse = response,
                 reason = reason,
+                strategies = finalStrategies,
                 alternatives = alternatives,
                 liveSignals = liveSignals,
                 deceptionSignal = deceptionState,
@@ -371,47 +474,35 @@ class LiveCopilotEngine(
             whyExplanation = if (isElevated) "Elevated linguistic qualifiers and negation detected." else "Speech metrics match normal conversation baseline."
         )
 
-        // 5. Formulate tactical response
-        val strategy: StrategyType
-        val tone: ToneType
-        val suggestedResponse: String
-        val reason: String
-
-        if (detectedInconsistency != null) {
-            strategy = StrategyType.CLARIFY
-            tone = ToneType.CALM_CURIOUS
-            suggestedResponse = "Can you help me understand how that aligns with our earlier baseline?"
-            reason = "Addresses statement variance neutrally without creating defensiveness."
-        } else if (isQuestion) {
-            strategy = StrategyType.DIRECT_RESPONSE
-            tone = ToneType.DIRECT
-            suggestedResponse = "From our perspective, the key priority is achieving the objective cleanly."
-            reason = "Directly satisfies the inquiry while anchoring to core priorities."
-        } else if (rawText.length > 25) {
-            strategy = StrategyType.MIRRORING
-            tone = ToneType.CALM
-            val mirrorPhrase = rawText.split(" ").takeLast(4).joinToString(" ")
-            suggestedResponse = "\"$mirrorPhrase?\""
-            reason = "Mirrors recent phrasing to encourage speaker elaboration."
-        } else {
-            strategy = StrategyType.COGNITIVE_PROBE
-            tone = ToneType.CURIOUS
-            suggestedResponse = "What would be the most effective next milestone from your perspective?"
-            reason = "Prompts strategic input and keeps dialogue moving forward."
-        }
-
-        val alternatives = listOf(
-            StrategyAlternative(StrategyType.COGNITIVE_PROBE, "What specific factor is driving that priority?", ToneType.CURIOUS),
-            StrategyAlternative(StrategyType.PIVOT, "Let's focus on the concrete deliverables for this sprint.", ToneType.DIPLOMATIC),
-            StrategyAlternative(StrategyType.BONDING, "I completely understand where you're coming from.", ToneType.WARM)
+        // 5. Evaluate dynamic strategy suite
+        val allStrategies = strategyEngine.evaluateStrategies(
+            caller = caller,
+            transcriptHistory = transcriptHistory,
+            latestUtterance = latest,
+            knownClaims = knownClaims,
+            knownMemories = knownMemories,
+            objective = objective,
+            detectedInconsistency = detectedInconsistency,
+            deceptionScore = deceptionScore
         )
 
+        val primaryStrategy = allStrategies.firstOrNull { it.isPrimaryRecommended } ?: allStrategies.first()
+
+        val alternatives = allStrategies.map {
+            StrategyAlternative(
+                strategy = it.type,
+                suggestedResponse = it.suggestedResponse,
+                tone = it.tone
+            )
+        }
+
         return CopilotAnalysisResult(
-            recommendedStrategy = strategy,
-            tone = tone,
-            confidence = 82,
-            suggestedResponse = suggestedResponse,
-            reason = reason,
+            recommendedStrategy = primaryStrategy.type,
+            tone = primaryStrategy.tone,
+            confidence = primaryStrategy.confidence,
+            suggestedResponse = primaryStrategy.suggestedResponse,
+            reason = primaryStrategy.recommendationReason,
+            strategies = allStrategies,
             alternatives = alternatives,
             liveSignals = LiveSignalMeters(
                 linguisticPosition = (hedgeCount * 0.2f).coerceIn(0.1f, 0.9f),
@@ -424,14 +515,30 @@ class LiveCopilotEngine(
         )
     }
 
-    private fun defaultPassiveResult(): CopilotAnalysisResult {
+    private fun defaultPassiveResult(
+        caller: PersonEntity?,
+        transcriptHistory: List<TranscriptSegment>,
+        latestUtterance: TranscriptSegment?,
+        knownClaims: List<ClaimEntity>,
+        knownMemories: List<MemoryEntity>,
+        objective: String
+    ): CopilotAnalysisResult {
+        val passiveStrategies = strategyEngine.evaluateStrategies(
+            caller = caller,
+            transcriptHistory = transcriptHistory,
+            latestUtterance = latestUtterance,
+            knownClaims = knownClaims,
+            knownMemories = knownMemories,
+            objective = objective
+        )
         return CopilotAnalysisResult(
             recommendedStrategy = StrategyType.DIRECT_RESPONSE,
             tone = ToneType.NEUTRAL,
             confidence = 50,
             suggestedResponse = "AI Analysis is paused in Settings.",
             reason = "AI Co-pilot turned off by user configuration.",
-            alternatives = emptyList(),
+            strategies = passiveStrategies,
+            alternatives = passiveStrategies.map { StrategyAlternative(it.type, it.suggestedResponse, it.tone) },
             liveSignals = LiveSignalMeters(0.1f, 0.1f, 0.1f),
             deceptionSignal = DeceptionSignalState(
                 score = 0,

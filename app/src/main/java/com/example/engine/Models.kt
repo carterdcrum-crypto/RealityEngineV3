@@ -1,21 +1,115 @@
 package com.example.engine
 
-enum class StrategyType(val displayName: String, val description: String) {
-    COGNITIVE_PROBE("COGNITIVE PROBE", "Neutral question uncovering hidden assumptions or inconsistencies"),
-    MIRRORING("MIRRORING", "Reflect back the exact last keywords to build rapport and prompt detail"),
-    PIVOT("PIVOT", "Shift the conversation focus toward the primary strategic objective"),
-    BONDING("BONDING", "Establish emotional alignment and shared context"),
-    CLARIFY("CLARIFY", "Request unambiguous definitions and timeline confirmations"),
-    CONFRONT("CONFRONT", "Firmly and objectively highlight factual discrepancies"),
-    VALIDATE("VALIDATE", "Acknowledge feelings and legitimacy to lower resistance"),
-    CHALLENGE("CHALLENGE", "Test strength of assertion with counter-evidence"),
-    DE_ESCALATE("DE-ESCALATE", "Lower emotional intensity and reset constructive dialogue"),
-    PROBE("PROBE", "Inquire further into specific rationale"),
-    FOLLOW_UP("FOLLOW-UP", "Verify previously agreed action items and commitments"),
-    SUMMARIZE("SUMMARIZE", "Recap key agreements to anchor commitments"),
-    PAUSE("PAUSE", "Deliberate strategic silence to prompt other party to elaborate"),
-    DIRECT_RESPONSE("DIRECT RESPONSE", "Provide clear, concise factual answer"),
-    ASSERTIVE("ASSERTIVE", "Direct and firm strategic positioning")
+import java.util.UUID
+
+enum class StrategyType(
+    val id: String,
+    val displayName: String,
+    val description: String,
+    val purpose: String,
+    val isPrimary: Boolean = false
+) {
+    BONDING(
+        id = "bonding",
+        displayName = "BONDING",
+        description = "Build rapport before probing",
+        purpose = "Build rapport, increase conversational openness, establish common ground, reduce unnecessary defensiveness.",
+        isPrimary = true
+    ),
+    COGNITIVE_PROBE(
+        id = "cognitive_probe",
+        displayName = "COGNITIVE PROBE",
+        description = "Clarify claims & timeline",
+        purpose = "Ask a targeted follow-up question designed to clarify a claim, expose ambiguity, establish chronology, or request concrete details.",
+        isPrimary = true
+    ),
+    MIRROR(
+        id = "mirror",
+        displayName = "MIRROR",
+        description = "Encourage elaboration",
+        purpose = "Reflect relevant language, framing, or conversational style to encourage the person to elaborate.",
+        isPrimary = true
+    ),
+    MIRRORING(
+        id = "mirroring",
+        displayName = "MIRROR",
+        description = "Encourage elaboration",
+        purpose = "Reflect relevant language, framing, or conversational style to encourage the person to elaborate.",
+        isPrimary = true
+    ),
+    PIVOT(
+        id = "pivot",
+        displayName = "PIVOT",
+        description = "Redirect the conversation",
+        purpose = "Redirect the conversation when the current conversational path is unproductive or when another topic/question is strategically more useful.",
+        isPrimary = true
+    ),
+    CLARIFY(
+        id = "clarify",
+        displayName = "CLARIFY",
+        description = "Request unambiguous definitions",
+        purpose = "Request unambiguous definitions and timeline confirmations."
+    ),
+    VERIFY(
+        id = "verify",
+        displayName = "VERIFY",
+        description = "Cross-check facts against baseline",
+        purpose = "Confirm specific dates, metrics, or factual statements with verifiable evidence."
+    ),
+    TIMELINE(
+        id = "timeline",
+        displayName = "TIMELINE",
+        description = "Establish chronological sequence",
+        purpose = "Walk through events in strict chronological order to uncover gaps or inconsistencies."
+    ),
+    SPECIFY(
+        id = "specify",
+        displayName = "SPECIFY",
+        description = "Request concrete quantifiable metrics",
+        purpose = "Drill down from general claims into specific numbers, deliverables, and dates."
+    ),
+    CONTRAST(
+        id = "contrast",
+        displayName = "CONTRAST",
+        description = "Highlight differences between statements",
+        purpose = "Compare current assertions directly with previous commitments or baselines."
+    ),
+    SUMMARIZE(
+        id = "summarize",
+        displayName = "SUMMARIZE",
+        description = "Recap key agreements to anchor commitments",
+        purpose = "Recap key agreements to anchor commitments and verify mutual consensus."
+    ),
+    OPEN_QUESTION(
+        id = "open_question",
+        displayName = "OPEN QUESTION",
+        description = "Invite broad unconstrained narrative",
+        purpose = "Provide wide conversational space to observe spontaneous details and unstructured narrative."
+    ),
+    CHALLENGE(
+        id = "challenge",
+        displayName = "CHALLENGE",
+        description = "Test assertion with counter-evidence",
+        purpose = "Firmly and objectively test the strength of an assertion with known counter-evidence."
+    ),
+    DE_ESCALATE(
+        id = "de_escalate",
+        displayName = "DE-ESCALATE",
+        description = "Lower emotional intensity",
+        purpose = "Lower emotional intensity, acknowledge feelings, and reset constructive dialogue."
+    ),
+    CLOSE(
+        id = "close",
+        displayName = "CLOSE",
+        description = "Conclude and secure next steps",
+        purpose = "Finalize mutual commitments, secure deadlines, and conclude the interaction cleanly."
+    ),
+    DIRECT_RESPONSE(
+        id = "direct_response",
+        displayName = "DIRECT RESPONSE",
+        description = "Clear factual answer",
+        purpose = "Provide clear, concise factual answer while anchoring to strategic priorities."
+    )
 }
 
 enum class ToneType(val displayName: String) {
@@ -35,8 +129,23 @@ enum class ToneType(val displayName: String) {
     DE_ESCALATING("DE-ESCALATING")
 }
 
+data class StrategyRecommendation(
+    val id: String = UUID.randomUUID().toString(),
+    val type: StrategyType,
+    val name: String = type.displayName,
+    val description: String = type.description,
+    val purpose: String = type.purpose,
+    val recommendationReason: String,
+    val suggestedResponse: String,
+    val confidence: Int = 80, // 0 to 100
+    val tone: ToneType = ToneType.CALM,
+    val isPrimaryRecommended: Boolean = false,
+    val isSelected: Boolean = false,
+    val enabled: Boolean = true
+)
+
 data class TranscriptSegment(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID().toString(),
     val speaker: Speaker,
     val speakerName: String,
     val text: String,
@@ -77,7 +186,7 @@ data class LiveSignalMeters(
 )
 
 data class MemoryCandidateAlert(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID().toString(),
     val statement: String, // e.g. "Sarah says she is moving in October."
     val suggestedState: String = "OBSERVED",
     val provenance: String = ""
@@ -96,7 +205,8 @@ data class CopilotAnalysisResult(
     val confidence: Int, // e.g. 84
     val suggestedResponse: String,
     val reason: String,
-    val alternatives: List<StrategyAlternative>,
+    val strategies: List<StrategyRecommendation> = emptyList(),
+    val alternatives: List<StrategyAlternative> = emptyList(),
     val liveSignals: LiveSignalMeters,
     val deceptionSignal: DeceptionSignalState,
     val inconsistencyAlert: InconsistencyAlert? = null,

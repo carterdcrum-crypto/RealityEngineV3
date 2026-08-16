@@ -69,8 +69,12 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.example.engine.Speaker
 import com.example.engine.StrategyAlternative
+import com.example.engine.StrategyRecommendation
+import com.example.engine.StrategyType
+import com.example.engine.ToneType
 import com.example.engine.TranscriptSegment
 import com.example.ui.RealityEngineViewModel
+import com.example.ui.components.LiveStrategiesPanel
 import com.example.ui.components.PrecisionCard
 import com.example.ui.components.PrecisionSectionHeader
 import com.example.ui.components.RealityEngineDialerGrid
@@ -371,20 +375,30 @@ fun ActiveCallScreen(
             }
 
             // ----------------------------------------------------
-            // 2. AI CO-PILOT RECOMMENDATION HERO CARD (#151518)
+            // 2. AI CO-PILOT ACTIVE DIRECTIVE HERO CARD (#151518)
             // ----------------------------------------------------
             item {
                 val copilot = callState.copilotResult
-                val activeStrat = callState.selectedAlternative?.strategy ?: copilot?.recommendedStrategy
-                val activeTone = callState.selectedAlternative?.tone ?: copilot?.tone
-                val activeResponse = callState.selectedAlternative?.suggestedResponse ?: copilot?.suggestedResponse ?: "Can you help me understand what changed in the timeline?"
+                val activeStrat = callState.selectedStrategy?.type 
+                    ?: callState.selectedAlternative?.strategy 
+                    ?: copilot?.recommendedStrategy
+                val activeTone = callState.selectedStrategy?.tone 
+                    ?: callState.selectedAlternative?.tone 
+                    ?: copilot?.tone
+                val activeResponse = callState.selectedStrategy?.suggestedResponse 
+                    ?: callState.selectedAlternative?.suggestedResponse 
+                    ?: copilot?.suggestedResponse 
+                    ?: "Can you help me understand what changed in the timeline?"
+                val activeConfidence = callState.selectedStrategy?.confidence ?: copilot?.confidence ?: 84
+                val activeReason = callState.selectedStrategy?.recommendationReason ?: copilot?.reason ?: "Maintains strategic initiative and clarity."
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(RealityEngineSurfaceElevated)
-                        .border(1.dp, RealityEngineAmber.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                        .border(1.dp, RealityEngineAmber.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .testTag("copilot_hero_directive_card")
                         .padding(16.dp)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -395,22 +409,33 @@ fun ActiveCallScreen(
                             verticalAlignment = Alignment.Top
                         ) {
                             Column {
-                                Text(
-                                    text = "AI CO-PILOT RECOMMENDATION",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = FontFamily.SansSerif,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.8.sp,
-                                        fontSize = 10.sp,
-                                        color = RealityEngineAmber
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(RealityEngineAmber)
                                     )
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "AI CO-PILOT ACTIVE DIRECTIVE",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.SansSerif,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.8.sp,
+                                            fontSize = 10.sp,
+                                            color = RealityEngineAmber
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = activeStrat?.displayName ?: "Cognitive Probe",
+                                    text = activeStrat?.displayName ?: "COGNITIVE PROBE",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontFamily = FontFamily.SansSerif,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.Bold,
                                         fontSize = 18.sp,
                                         color = RealityEngineTextPrimary
                                     )
@@ -428,7 +453,7 @@ fun ActiveCallScreen(
                                     )
                                 )
                                 Text(
-                                    text = "${copilot?.confidence ?: 84}%",
+                                    text = "$activeConfidence%",
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.SemiBold,
@@ -439,109 +464,57 @@ fun ActiveCallScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                        // Tone & Strategy Tags Grid (2 Columns)
+                        // Reason / Tactical rationale
+                        Text(
+                            text = activeReason,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                color = RealityEngineTextSecondary
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Tone Badges
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Left Col: Tone
-                            Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "TONE:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = 10.sp,
+                                    letterSpacing = 1.sp,
+                                    color = RealityEngineTextSecondary.copy(alpha = 0.5f)
+                                )
+                            )
+                            val toneDisplay = activeTone?.displayName ?: "CALM · CURIOUS"
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(RealityEngineBgWhite05)
+                                    .border(1.dp, RealityEngineBorderWhite10, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
                                 Text(
-                                    text = "TONE",
+                                    text = toneDisplay.uppercase(),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontFamily = FontFamily.SansSerif,
                                         fontSize = 10.sp,
-                                        letterSpacing = 1.sp,
-                                        color = RealityEngineTextSecondary.copy(alpha = 0.4f)
+                                        fontWeight = FontWeight.Medium,
+                                        color = RealityEngineTextPrimary
                                     )
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    val tones = if (activeTone != null) listOf(activeTone.displayName) else listOf("CALM", "CURIOUS")
-                                    tones.forEach { toneName ->
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(RealityEngineBgWhite05)
-                                                .border(1.dp, RealityEngineBorderWhite10, RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                                        ) {
-                                            Text(
-                                                text = toneName.uppercase(),
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontFamily = FontFamily.SansSerif,
-                                                    fontSize = 10.sp,
-                                                    color = RealityEngineTextPrimary
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Right Col: Strategies
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "STRATEGIES",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = FontFamily.SansSerif,
-                                        fontSize = 10.sp,
-                                        letterSpacing = 1.sp,
-                                        color = RealityEngineTextSecondary.copy(alpha = 0.4f)
-                                    )
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "Mirror",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontStyle = FontStyle.Italic,
-                                            fontSize = 11.sp,
-                                            color = RealityEngineAmber
-                                        ),
-                                        modifier = Modifier.clickable {
-                                            viewModel.selectAlternativeStrategy(
-                                                StrategyAlternative(
-                                                    com.example.engine.StrategyType.MIRRORING,
-                                                    "\"The meeting was never Friday?\"",
-                                                    com.example.engine.ToneType.CALM
-                                                )
-                                            )
-                                        }
-                                    )
-                                    Text(
-                                        text = "•",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = RealityEngineTextSecondary.copy(alpha = 0.4f)
-                                        )
-                                    )
-                                    Text(
-                                        text = "Pivot",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontStyle = FontStyle.Italic,
-                                            fontSize = 11.sp,
-                                            color = RealityEngineTextSecondary.copy(alpha = 0.6f)
-                                        ),
-                                        modifier = Modifier.clickable {
-                                            viewModel.selectAlternativeStrategy(
-                                                StrategyAlternative(
-                                                    com.example.engine.StrategyType.PIVOT,
-                                                    "What date did you have in mind for the initial review then?",
-                                                    com.example.engine.ToneType.DIPLOMATIC
-                                                )
-                                            )
-                                        }
-                                    )
-                                }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Suggested Response Box (Amber tinted box with italic quote)
                         Box(
@@ -549,7 +522,7 @@ fun ActiveCallScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(RealityEngineAmberContainer)
-                                .border(1.dp, RealityEngineAmber.copy(alpha = 0.20f), RoundedCornerShape(12.dp))
+                                .border(1.dp, RealityEngineAmber.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
                                 .padding(12.dp)
                         ) {
                             Text(
@@ -564,6 +537,26 @@ fun ActiveCallScreen(
                         }
                     }
                 }
+            }
+
+            // ----------------------------------------------------
+            // 2.5 LIVE STRATEGIES ACTION PANEL (BONDING, COGNITIVE PROBE, MIRROR, PIVOT, & EXTENSIONS)
+            // ----------------------------------------------------
+            item {
+                val copilot = callState.copilotResult
+                val allStrategies = copilot?.strategies ?: emptyList()
+
+                LiveStrategiesPanel(
+                    strategies = allStrategies,
+                    selectedStrategy = callState.selectedStrategy,
+                    primaryStrategyType = copilot?.recommendedStrategy,
+                    onSelectStrategy = { strat ->
+                        viewModel.selectStrategy(strat)
+                    },
+                    onSendUtterance = { utterance ->
+                        viewModel.sendManualUtterance(utterance, isYou = true)
+                    }
+                )
             }
 
             // ----------------------------------------------------

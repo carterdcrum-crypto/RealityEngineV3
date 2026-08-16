@@ -21,6 +21,8 @@ import com.example.engine.LiveCopilotEngine
 import com.example.engine.MemoryCandidateAlert
 import com.example.engine.Speaker
 import com.example.engine.StrategyAlternative
+import com.example.engine.StrategyRecommendation
+import com.example.engine.StrategyType
 import com.example.engine.TranscriberState
 import com.example.engine.TranscriptSegment
 import com.example.telecom.CallManager
@@ -58,6 +60,7 @@ data class ActiveCallState(
     val copilotResult: CopilotAnalysisResult? = null,
     val activeInconsistency: InconsistencyAlert? = null,
     val selectedAlternative: StrategyAlternative? = null,
+    val selectedStrategy: StrategyRecommendation? = null,
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = false,
     val isKeypadOpen: Boolean = false,
@@ -592,12 +595,25 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
         addTranscriptTurn(segment)
     }
 
+    fun selectStrategy(strat: StrategyRecommendation) {
+        _activeCall.update {
+            it.copy(
+                selectedStrategy = strat,
+                selectedAlternative = StrategyAlternative(
+                    strategy = strat.type,
+                    suggestedResponse = strat.suggestedResponse,
+                    tone = strat.tone
+                )
+            )
+        }
+    }
+
     fun selectAlternativeStrategy(alt: StrategyAlternative) {
         _activeCall.update { it.copy(selectedAlternative = alt) }
     }
 
     fun resetSelectedAlternative() {
-        _activeCall.update { it.copy(selectedAlternative = null) }
+        _activeCall.update { it.copy(selectedAlternative = null, selectedStrategy = null) }
     }
 
     fun saveMemoryCandidate(alert: MemoryCandidateAlert, state: String = "OBSERVED") {
