@@ -1,0 +1,6 @@
+{
+  "name": "Reality Engine",
+  "description": "Phone dialer and live conversation co-pilot with real-time transcription, deception signals, strategies, memory, and claim analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
