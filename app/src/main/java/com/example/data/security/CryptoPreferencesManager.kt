@@ -64,6 +64,21 @@ class CryptoPreferencesManager(private val context: Context) {
     }
     fun getTwilioPhoneNumber(): String = prefs.getString(PREF_TWILIO_PHONE, "") ?: ""
 
+    fun saveTwilioAccessToken(token: String) {
+        prefs.edit().putString(PREF_TWILIO_ACCESS_TOKEN, token.trim()).apply()
+    }
+    fun getTwilioAccessToken(): String = prefs.getString(PREF_TWILIO_ACCESS_TOKEN, "") ?: ""
+
+    fun saveTwilioMediaStreamUrl(url: String) {
+        prefs.edit().putString(PREF_TWILIO_MEDIA_STREAM_URL, url.trim()).apply()
+    }
+    fun getTwilioMediaStreamUrl(): String = prefs.getString(PREF_TWILIO_MEDIA_STREAM_URL, "") ?: ""
+
+    fun saveOpenAiKey(key: String) {
+        prefs.edit().putString(PREF_OPENAI_KEY, key.trim()).apply()
+    }
+    fun getOpenAiKey(): String = prefs.getString(PREF_OPENAI_KEY, "") ?: ""
+
     fun saveDeepgramKey(apiKey: String) {
         prefs.edit().putString(PREF_DEEPGRAM_KEY, apiKey.trim()).apply()
     }
@@ -95,6 +110,9 @@ class CryptoPreferencesManager(private val context: Context) {
             .remove(PREF_TWILIO_SID)
             .remove(PREF_TWILIO_TOKEN)
             .remove(PREF_TWILIO_PHONE)
+            .remove(PREF_TWILIO_ACCESS_TOKEN)
+            .remove(PREF_TWILIO_MEDIA_STREAM_URL)
+            .remove(PREF_OPENAI_KEY)
             .remove(PREF_DEEPGRAM_KEY)
             .remove(PREF_GROQ_KEY)
             .remove(PREF_GROQ_MODEL)
@@ -255,7 +273,10 @@ class CryptoPreferencesManager(private val context: Context) {
         private const val PREF_TWILIO_SID = "enc_twilio_sid"
         private const val PREF_TWILIO_TOKEN = "enc_twilio_token"
         private const val PREF_TWILIO_PHONE = "enc_twilio_phone"
+        private const val PREF_TWILIO_ACCESS_TOKEN = "enc_twilio_access_token"
+        private const val PREF_TWILIO_MEDIA_STREAM_URL = "enc_twilio_media_stream_url"
 
+        private const val PREF_OPENAI_KEY = "enc_openai_key"
         private const val PREF_DEEPGRAM_KEY = "enc_deepgram_key"
         private const val PREF_GROQ_KEY = "enc_groq_key"
         private const val PREF_GROQ_MODEL = "groq_model"

@@ -115,9 +115,9 @@ fun ActiveCallScreen(
         }
     }
 
-    val callerName = callState.caller?.name ?: "Sarah Jenkins"
+    val callerName = callState.caller?.name ?: callState.phoneNumber.ifBlank { "Live Call" }
     val durationFormatted = viewModel.formatCallDuration(callState.elapsedSeconds)
-    val activeTopic = callState.objective.ifBlank { "Project X • Active" }
+    val activeTopic = callState.objective.ifBlank { "Active Call Session" }
 
     Column(
         modifier = modifier

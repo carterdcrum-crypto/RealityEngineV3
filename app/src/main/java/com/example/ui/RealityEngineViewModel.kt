@@ -93,6 +93,7 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     private val copilotEngine = LiveCopilotEngine(cryptoManager)
     val twilioService = TwilioTelephonyService()
     val transcriber = DeepgramLiveTranscriber()
+    val mediaStreamBridge = com.example.engine.TwilioMediaStreamBridge()
 
     // DAOs
     val personDao = db.personDao()
@@ -321,13 +322,39 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
             }
         }
         viewModelScope.launch {
+            mediaStreamBridge.transcriptFlow.collect { segment ->
+                addTranscriptTurn(segment)
+            }
+        }
+        viewModelScope.launch {
             transcriber.state.collect { tState ->
                 _activeCall.update { it.copy(transcriberState = tState) }
             }
         }
         viewModelScope.launch {
+            mediaStreamBridge.streamState.collect { sState ->
+                val mapped = when (sState) {
+                    com.example.engine.MediaStreamState.STREAMING -> TranscriberState.LISTENING
+                    com.example.engine.MediaStreamState.CONNECTING -> TranscriberState.CONNECTING
+                    com.example.engine.MediaStreamState.ERROR -> TranscriberState.ERROR
+                    com.example.engine.MediaStreamState.STOPPED -> TranscriberState.STOPPED
+                    com.example.engine.MediaStreamState.IDLE -> TranscriberState.IDLE
+                }
+                _activeCall.update { it.copy(transcriberState = mapped) }
+            }
+        }
+        viewModelScope.launch {
             transcriber.audioAmplitude.collect { amp ->
-                _activeCall.update { it.copy(audioWaveformAmp = amp) }
+                if (amp > 0f || _activeCall.value.audioWaveformAmp == 0f) {
+                    _activeCall.update { it.copy(audioWaveformAmp = amp) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            mediaStreamBridge.audioAmplitude.collect { amp ->
+                if (amp > 0f) {
+                    _activeCall.update { it.copy(audioWaveformAmp = amp) }
+                }
             }
         }
     }
@@ -411,6 +438,20 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     }
 
     private fun placeTwilioCall(sid: String, token: String, from: String, to: String) {
+        val accessToken = cryptoManager.getTwilioAccessToken()
+        if (accessToken.isNotBlank()) {
+            val service = CallService.getInstance()
+            if (service != null) {
+                _activeCall.update { it.copy(isTwilioCall = true, callState = CallState.CONNECTING) }
+                val params = mapOf("To" to to, "From" to from)
+                val sdkCall = service.connectTwilioSdkCall(accessToken, params)
+                if (sdkCall != null) {
+                    _activeCall.update { it.copy(twilioCallSid = sdkCall.sid) }
+                    return
+                }
+            }
+        }
+
         viewModelScope.launch {
             _activeCall.update { it.copy(isTwilioCall = true) }
             val result = twilioService.placeCall(
@@ -459,8 +500,14 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
         // Start Deepgram live transcription if enabled and key is present
         val deepgramKey = cryptoManager.getDeepgramKey()
+        val mediaStreamUrl = cryptoManager.getTwilioMediaStreamUrl()
+
         if (cryptoManager.isLiveTranscriptionEnabled && deepgramKey.isNotBlank()) {
-            transcriber.startStreaming(deepgramKey)
+            if (mediaStreamUrl.isNotBlank()) {
+                mediaStreamBridge.startMediaStreamPipe(mediaStreamUrl, deepgramKey)
+            } else {
+                transcriber.startStreaming(deepgramKey)
+            }
         }
 
         // Initialize initial active copilot assessment
@@ -603,7 +650,10 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     fun appendDtmf(char: String) {
         if (char.isNotEmpty()) {
-            CallManager.playDtmf(char[0])
+            val digit = char[0]
+            CallManager.playDtmf(digit)
+            CallService.sendDtmf(digit)
+
             val activeTwilio = _activeCall.value.twilioCallSid
             if (activeTwilio != null) {
                 val sid = cryptoManager.getTwilioSid()
@@ -618,6 +668,7 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     fun endActiveCall() {
         transcriber.stopStreaming()
+        mediaStreamBridge.stopMediaStreamPipe()
         CallService.disconnectCall()
 
         val current = _activeCall.value

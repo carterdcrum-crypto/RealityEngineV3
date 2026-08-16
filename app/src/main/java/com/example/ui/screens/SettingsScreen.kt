@@ -103,7 +103,10 @@ fun SettingsScreen(
     var twilioSid by remember { mutableStateOf(cryptoManager.getTwilioSid()) }
     var twilioToken by remember { mutableStateOf(cryptoManager.getTwilioToken()) }
     var twilioPhone by remember { mutableStateOf(cryptoManager.getTwilioPhoneNumber()) }
+    var twilioAccessToken by remember { mutableStateOf(cryptoManager.getTwilioAccessToken()) }
+    var twilioMediaStreamUrl by remember { mutableStateOf(cryptoManager.getTwilioMediaStreamUrl()) }
 
+    var openAiKey by remember { mutableStateOf(cryptoManager.getOpenAiKey()) }
     var deepgramKey by remember { mutableStateOf(cryptoManager.getDeepgramKey()) }
     var groqKey by remember { mutableStateOf(cryptoManager.getGroqKey()) }
     var groqModel by remember { mutableStateOf(cryptoManager.getGroqModel()) }
@@ -523,6 +526,27 @@ fun SettingsScreen(
                                         cryptoManager.saveTwilioPhoneNumber(it)
                                     }
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                EncryptedInputField(
+                                    label = "Twilio Voice Access Token (JWT for WebRTC)",
+                                    value = twilioAccessToken,
+                                    isSecret = true,
+                                    testTag = "settings_input_twilio_access_token",
+                                    onValueChange = {
+                                        twilioAccessToken = it
+                                        cryptoManager.saveTwilioAccessToken(it)
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                EncryptedInputField(
+                                    label = "Twilio Media Stream URL (wss://...)",
+                                    value = twilioMediaStreamUrl,
+                                    testTag = "settings_input_twilio_media_stream_url",
+                                    onValueChange = {
+                                        twilioMediaStreamUrl = it
+                                        cryptoManager.saveTwilioMediaStreamUrl(it)
+                                    }
+                                )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 ApiTestButton(
                                     serviceName = "TWILIO",
@@ -665,6 +689,9 @@ fun SettingsScreen(
                                     cryptoManager.saveTwilioSid(twilioSid)
                                     cryptoManager.saveTwilioToken(twilioToken)
                                     cryptoManager.saveTwilioPhoneNumber(twilioPhone)
+                                    cryptoManager.saveTwilioAccessToken(twilioAccessToken)
+                                    cryptoManager.saveTwilioMediaStreamUrl(twilioMediaStreamUrl)
+                                    cryptoManager.saveOpenAiKey(openAiKey)
                                     cryptoManager.saveDeepgramKey(deepgramKey)
                                     cryptoManager.saveGroqKey(groqKey)
                                     cryptoManager.saveGroqModel(groqModel)
@@ -703,6 +730,9 @@ fun SettingsScreen(
                                     twilioSid = ""
                                     twilioToken = ""
                                     twilioPhone = ""
+                                    twilioAccessToken = ""
+                                    twilioMediaStreamUrl = ""
+                                    openAiKey = ""
                                     deepgramKey = ""
                                     groqKey = ""
                                     groqModel = "llama-3.1-8b-instant"

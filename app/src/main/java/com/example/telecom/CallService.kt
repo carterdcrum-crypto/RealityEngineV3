@@ -79,6 +79,13 @@ class CallService : InCallService() {
             _serviceState.value = CallState.DISCONNECTED
         }
 
+        fun sendDtmf(digit: Char) {
+            // Send DTMF to Twilio SDK Call
+            _activeTwilioSdkCall.value?.sendDigits(digit.toString())
+            // Send DTMF to Telecom Call
+            CallManager.playDtmf(digit)
+        }
+
         fun toggleMute(): Boolean {
             val service = instance
             val newMute = !_isMuted.value
