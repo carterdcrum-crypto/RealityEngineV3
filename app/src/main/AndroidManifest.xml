@@ -60,15 +60,17 @@
             </intent-filter>
         </activity>
 
-        <!-- Telecom InCallService for Default Dialer -->
+        <!-- Primary CallService (InCallService & Foreground Phone Call Service) -->
         <service
-            android:name=".telecom.TelecomInCallService"
+            android:name=".telecom.CallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
+            android:foregroundServiceType="phoneCall"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
             </intent-filter>
         </service>
     </application>
+
 
 </manifest>

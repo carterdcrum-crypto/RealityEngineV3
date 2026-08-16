@@ -259,9 +259,6 @@ fun DialerScreen(
                         targetNumber = dialerNumber,
                         knownPerson = matchingContact
                     )
-                },
-                onSimulateIncoming = {
-                    viewModel.triggerIncomingCall(people.firstOrNull { it.name == "Sarah" })
                 }
             )
         } else {
@@ -285,8 +282,7 @@ private fun KeypadView(
     onDigitClick: (String) -> Unit,
     onDeleteClick: () -> Unit,
     onClearClick: () -> Unit,
-    onCallClick: () -> Unit,
-    onSimulateIncoming: () -> Unit
+    onCallClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -382,7 +378,7 @@ private fun KeypadView(
                 .padding(vertical = 4.dp)
         )
 
-        // Call Action Dock (Incoming simulation, Call button, Quick contact)
+        // Call Action Dock (Clear, Call button, Backspace)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -394,21 +390,23 @@ private fun KeypadView(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Incoming Call Test Trigger
+                // Clear Dialer Button
                 IconButton(
-                    onClick = onSimulateIncoming,
+                    onClick = onClearClick,
+                    enabled = dialerNumber.isNotEmpty(),
                     modifier = Modifier
                         .size(52.dp)
                         .clip(CircleShape)
                         .background(RealityEngineSurfaceElevated)
                         .border(1.dp, RealityEngineBorder, CircleShape)
-                        .testTag("simulate_incoming_button")
+                        .testTag("dialer_clear_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PhoneCallback,
-                        contentDescription = "Simulate Incoming Call from Sarah",
-                        tint = RealityEngineCyan,
-                        modifier = Modifier.size(22.dp)
+                    Text(
+                        text = "CLR",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (dialerNumber.isNotEmpty()) RealityEngineAmber else RealityEngineTextDisabled
                     )
                 }
 
@@ -432,32 +430,30 @@ private fun KeypadView(
                     )
                 }
 
-                // Quick Sarah Shortcut
+                // Delete Digit / Backspace Button
                 IconButton(
-                    onClick = {
-                        onDigitClick("+14158902134")
-                    },
+                    onClick = onDeleteClick,
+                    enabled = dialerNumber.isNotEmpty(),
                     modifier = Modifier
                         .size(52.dp)
                         .clip(CircleShape)
                         .background(RealityEngineSurfaceElevated)
                         .border(1.dp, RealityEngineBorder, CircleShape)
-                        .testTag("quick_sarah_button")
+                        .testTag("dialer_backspace_dock")
                 ) {
-                    Text(
-                        text = "SARAH",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = RealityEngineAmber
+                    Icon(
+                        imageVector = Icons.Default.Backspace,
+                        contentDescription = "Backspace",
+                        tint = if (dialerNumber.isNotEmpty()) RealityEngineAmber else RealityEngineTextDisabled,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Tap 0 long for + · Green to call · Blue to simulate",
+                text = "Hold 0 for + · Tap Green to Call",
                 style = MaterialTheme.typography.bodySmall.copy(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 9.sp,

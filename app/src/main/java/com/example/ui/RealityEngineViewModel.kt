@@ -1,8 +1,11 @@
 package com.example.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.contacts.DeviceContact
+import com.example.data.contacts.DeviceContactsManager
 import com.example.data.local.RealityEngineDatabase
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.ClaimEntity
@@ -12,19 +15,19 @@ import com.example.data.model.SignalEventEntity
 import com.example.data.security.CryptoPreferencesManager
 import com.example.engine.CallSummaryPayload
 import com.example.engine.CopilotAnalysisResult
-import com.example.engine.DeceptionSignalState
+import com.example.engine.DeepgramLiveTranscriber
 import com.example.engine.InconsistencyAlert
 import com.example.engine.LiveCopilotEngine
-import com.example.engine.LiveSignalMeters
 import com.example.engine.MemoryCandidateAlert
 import com.example.engine.Speaker
 import com.example.engine.StrategyAlternative
-import com.example.engine.StrategyType
-import com.example.engine.ToneType
+import com.example.engine.TranscriberState
 import com.example.engine.TranscriptSegment
 import com.example.telecom.CallManager
-import com.example.telecom.TelecomCallState
+import com.example.telecom.CallService
+import com.example.telecom.CallState
 import com.example.telecom.TelecomRoleManager
+import com.example.telecom.TwilioTelephonyService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,6 +39,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.UUID
 
 enum class AppNavTab {
     CALL, PEOPLE, MEMORY, SIGNALS
@@ -49,18 +53,23 @@ data class ActiveCallState(
     val caller: PersonEntity? = null,
     val phoneNumber: String = "",
     val elapsedSeconds: Int = 0,
-    val objective: String = "Project X Milestone Review & Schedule",
+    val objective: String = "Live Consultation & Fact Verification",
     val transcript: List<TranscriptSegment> = emptyList(),
     val copilotResult: CopilotAnalysisResult? = null,
+    val activeInconsistency: InconsistencyAlert? = null,
     val selectedAlternative: StrategyAlternative? = null,
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = false,
     val isKeypadOpen: Boolean = false,
     val isHold: Boolean = false,
     val keypadDtmf: String = "",
-    val activeInconsistency: InconsistencyAlert? = null,
     val activeMemoryAlert: MemoryCandidateAlert? = null,
-    val simulationScriptIndex: Int = 0
+    val isTwilioCall: Boolean = false,
+    val twilioCallSid: String? = null,
+    val callState: CallState = CallState.IDLE,
+    val rawTwilioStatus: String? = null,
+    val transcriberState: TranscriberState = TranscriberState.IDLE,
+    val audioWaveformAmp: Float = 0f
 )
 
 data class ApiTestState(
@@ -75,10 +84,15 @@ data class ApiTestState(
 )
 
 class RealityEngineViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        private const val TAG = "RealityEngineViewModel"
+    }
 
     private val db = RealityEngineDatabase.getDatabase(application, viewModelScope)
     val cryptoManager = CryptoPreferencesManager(application)
     private val copilotEngine = LiveCopilotEngine(cryptoManager)
+    val twilioService = TwilioTelephonyService()
+    val transcriber = DeepgramLiveTranscriber()
 
     // DAOs
     val personDao = db.personDao()
@@ -86,6 +100,8 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     val memoryDao = db.memoryDao()
     val claimDao = db.claimDao()
     val signalEventDao = db.signalEventDao()
+
+    val contactsManager = DeviceContactsManager(application, personDao)
 
     // Navigation & UI States
     private val _isDefaultPhoneApp = MutableStateFlow(false)
@@ -96,6 +112,10 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     private val _isSettingsOpen = MutableStateFlow(false)
     val isSettingsOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+
+    // Authoritative Call Lifecycle State
+    private val _callState = MutableStateFlow(CallState.IDLE)
+    val callState: StateFlow<CallState> = _callState.asStateFlow()
 
     private val _callScreenState = MutableStateFlow(CallScreenState.IDLE)
     val callScreenState: StateFlow<CallScreenState> = _callScreenState.asStateFlow()
@@ -118,6 +138,9 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     private val _apiTestState = MutableStateFlow(ApiTestState())
     val apiTestState: StateFlow<ApiTestState> = _apiTestState.asStateFlow()
+
+    private val _syncStatusMessage = MutableStateFlow<String?>(null)
+    val syncStatusMessage: StateFlow<String?> = _syncStatusMessage.asStateFlow()
 
     // Data Streams from Room
     val people = personDao.getAllPeopleFlow().stateIn(
@@ -157,11 +180,12 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     )
 
     private var callTimerJob: Job? = null
-    private var simulationScriptJob: Job? = null
 
     init {
         refreshDefaultPhoneStatus()
         observeTelecomCalls()
+        observeTwilioCalls()
+        observeTranscriber()
     }
 
     fun refreshDefaultPhoneStatus() {
@@ -173,8 +197,11 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch {
             CallManager.callInfo.collect { info ->
                 if (info == null) return@collect
-                when (info.state) {
-                    TelecomCallState.RINGING -> {
+                val realState = info.state
+                _callState.value = realState
+                _activeCall.update { it.copy(callState = realState) }
+                when (realState) {
+                    CallState.RINGING -> {
                         val num = info.phoneNumber
                         val person = people.value.firstOrNull {
                             it.phoneNumber.replace("[^0-9]".toRegex(), "") == num.replace("[^0-9]".toRegex(), "") ||
@@ -190,14 +217,16 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
                         _activeCall.value = ActiveCallState(
                             caller = person,
-                            phoneNumber = num.ifBlank { "+1 (555) 019-2834" },
+                            phoneNumber = num.ifBlank { "Incoming Call" },
                             elapsedSeconds = 0,
-                            objective = person?.currentTopics ?: "Inbound Telecom Call",
-                            transcript = emptyList()
+                            objective = person?.currentTopics?.ifBlank { "Inbound Telecom Call" } ?: "Inbound Telecom Call",
+                            transcript = emptyList(),
+                            isTwilioCall = false,
+                            callState = CallState.RINGING
                         )
                         _callScreenState.value = CallScreenState.INCOMING
                     }
-                    TelecomCallState.DIALING, TelecomCallState.CONNECTING -> {
+                    CallState.CONNECTING -> {
                         if (_callScreenState.value != CallScreenState.DIALING && _callScreenState.value != CallScreenState.ACTIVE) {
                             val num = info.phoneNumber
                             val person = people.value.firstOrNull {
@@ -207,17 +236,22 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
                                 caller = person,
                                 phoneNumber = num,
                                 elapsedSeconds = 0,
-                                objective = person?.currentTopics ?: "Outbound Call"
+                                objective = person?.currentTopics?.ifBlank { "Outbound Call" } ?: "Outbound Call",
+                                isTwilioCall = false,
+                                callState = CallState.CONNECTING
                             )
                             _callScreenState.value = CallScreenState.DIALING
                         }
                     }
-                    TelecomCallState.ACTIVE -> {
+                    CallState.ACTIVE -> {
                         if (_callScreenState.value != CallScreenState.ACTIVE) {
                             transitionToActiveCall()
                         }
                     }
-                    TelecomCallState.DISCONNECTED -> {
+                    CallState.HOLDING -> {
+                        _activeCall.update { it.copy(isHold = true) }
+                    }
+                    CallState.DISCONNECTED -> {
                         if (_callScreenState.value == CallScreenState.ACTIVE) {
                             endActiveCall()
                         } else if (_callScreenState.value == CallScreenState.INCOMING || _callScreenState.value == CallScreenState.DIALING) {
@@ -225,8 +259,75 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
                             stopCallTimers()
                         }
                     }
-                    else -> {}
+                    CallState.IDLE -> {}
                 }
+            }
+        }
+    }
+
+    private fun observeTwilioCalls() {
+        viewModelScope.launch {
+            twilioService.currentCall.collect { twilioCall ->
+                if (twilioCall == null) return@collect
+                val realState = twilioCall.state
+                _callState.value = realState
+                _activeCall.update {
+                    it.copy(
+                        callState = realState,
+                        rawTwilioStatus = twilioCall.rawTwilioStatus,
+                        twilioCallSid = twilioCall.callSid,
+                        isTwilioCall = true
+                    )
+                }
+                when (realState) {
+                    CallState.CONNECTING, CallState.RINGING -> {
+                        if (_callScreenState.value != CallScreenState.ACTIVE) {
+                            _callScreenState.value = CallScreenState.DIALING
+                        }
+                    }
+                    CallState.ACTIVE -> {
+                        if (_callScreenState.value != CallScreenState.ACTIVE) {
+                            _activeCall.update {
+                                it.copy(
+                                    isTwilioCall = true,
+                                    twilioCallSid = twilioCall.callSid,
+                                    callState = CallState.ACTIVE
+                                )
+                            }
+                            transitionToActiveCall()
+                        }
+                    }
+                    CallState.HOLDING -> {
+                        _activeCall.update { it.copy(isHold = true) }
+                    }
+                    CallState.DISCONNECTED -> {
+                        if (_callScreenState.value == CallScreenState.ACTIVE) {
+                            endActiveCall()
+                        } else if (_callScreenState.value == CallScreenState.DIALING || _callScreenState.value == CallScreenState.INCOMING) {
+                            _callScreenState.value = CallScreenState.IDLE
+                            stopCallTimers()
+                        }
+                    }
+                    CallState.IDLE -> {}
+                }
+            }
+        }
+    }
+
+    private fun observeTranscriber() {
+        viewModelScope.launch {
+            transcriber.transcriptFlow.collect { segment ->
+                addTranscriptTurn(segment)
+            }
+        }
+        viewModelScope.launch {
+            transcriber.state.collect { tState ->
+                _activeCall.update { it.copy(transcriberState = tState) }
+            }
+        }
+        viewModelScope.launch {
+            transcriber.audioAmplitude.collect { amp ->
+                _activeCall.update { it.copy(audioWaveformAmp = amp) }
             }
         }
     }
@@ -265,9 +366,13 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     // Telephony & Call Flow
     fun startOutgoingCall(targetNumber: String, knownPerson: PersonEntity? = null) {
-        val numberToCall = targetNumber.ifBlank { knownPerson?.phoneNumber ?: "+1 (415) 890-2134" }
+        val numberToCall = targetNumber.ifBlank { knownPerson?.phoneNumber ?: "" }
+        if (numberToCall.isBlank()) return
+
         val person = knownPerson ?: people.value.firstOrNull {
-            it.phoneNumber.replace("[^0-9]".toRegex(), "") == numberToCall.replace("[^0-9]".toRegex(), "")
+            val cleanA = it.phoneNumber.replace("[^0-9]".toRegex(), "")
+            val cleanB = numberToCall.replace("[^0-9]".toRegex(), "")
+            cleanA.isNotEmpty() && (cleanA == cleanB || cleanA.endsWith(cleanB) || cleanB.endsWith(cleanA))
         }
 
         _activeCall.value = ActiveCallState(
@@ -276,40 +381,48 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
             elapsedSeconds = 0,
             objective = person?.currentTopics?.ifBlank { "Direct Consultation" } ?: "Direct Consultation",
             transcript = emptyList(),
-            simulationScriptIndex = 0
+            isTwilioCall = false
         )
         _callScreenState.value = CallScreenState.DIALING
 
-        // If default dialer, trigger real outbound phone call via TelecomManager
-        val isRealDialer = isDefaultPhoneApp.value
-        val callPlaced = if (isRealDialer) {
-            CallManager.placeOutgoingCall(getApplication(), numberToCall)
-        } else false
+        val twilioSid = cryptoManager.getTwilioSid()
+        val twilioToken = cryptoManager.getTwilioToken()
+        val twilioPhone = cryptoManager.getTwilioPhoneNumber()
 
-        if (!callPlaced) {
-            // Local simulation fallback for testing / emulator
-            viewModelScope.launch {
-                delay(2200) // Connecting delay
-                if (_callScreenState.value == CallScreenState.DIALING) {
-                    transitionToActiveCall()
-                }
+        val isDefault = isDefaultPhoneApp.value
+
+        if (isDefault) {
+            // Native default phone dialer via Android Telecom
+            val callPlaced = CallManager.placeOutgoingCall(getApplication(), numberToCall)
+            if (!callPlaced && twilioSid.isNotBlank() && twilioPhone.isNotBlank()) {
+                // Fallback to Twilio Voice
+                placeTwilioCall(twilioSid, twilioToken, twilioPhone, numberToCall)
+            }
+        } else if (twilioSid.isNotBlank() && twilioPhone.isNotBlank()) {
+            // Programmable Twilio Call
+            placeTwilioCall(twilioSid, twilioToken, twilioPhone, numberToCall)
+        } else {
+            // Trigger Android Telecom call
+            val callPlaced = CallManager.placeOutgoingCall(getApplication(), numberToCall)
+            if (!callPlaced) {
+                Log.w(TAG, "Neither Default Phone role nor Twilio credentials configured.")
             }
         }
     }
 
-    fun triggerIncomingCall(caller: PersonEntity? = null) {
-        val person = caller ?: people.value.firstOrNull { it.name == "Sarah" } ?: people.value.firstOrNull()
-        val phoneNumber = person?.phoneNumber ?: "+1 (415) 890-2134"
-
-        _activeCall.value = ActiveCallState(
-            caller = person,
-            phoneNumber = phoneNumber,
-            elapsedSeconds = 0,
-            objective = person?.currentTopics ?: "Project X Milestone Review & Schedule",
-            transcript = emptyList(),
-            simulationScriptIndex = 0
-        )
-        _callScreenState.value = CallScreenState.INCOMING
+    private fun placeTwilioCall(sid: String, token: String, from: String, to: String) {
+        viewModelScope.launch {
+            _activeCall.update { it.copy(isTwilioCall = true) }
+            val result = twilioService.placeCall(
+                accountSid = sid,
+                authToken = token,
+                fromNumber = from,
+                toNumber = to
+            )
+            result.onFailure { err ->
+                Log.e(TAG, "Twilio call error: ${err.message}")
+            }
+        }
     }
 
     fun answerIncomingCall() {
@@ -343,7 +456,25 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     private fun transitionToActiveCall() {
         _callScreenState.value = CallScreenState.ACTIVE
         startCallTimer()
-        startLiveDialogueStream()
+
+        // Start Deepgram live transcription if enabled and key is present
+        val deepgramKey = cryptoManager.getDeepgramKey()
+        if (cryptoManager.isLiveTranscriptionEnabled && deepgramKey.isNotBlank()) {
+            transcriber.startStreaming(deepgramKey)
+        }
+
+        // Initialize initial active copilot assessment
+        viewModelScope.launch {
+            val initialResult = copilotEngine.analyzeConversationTurn(
+                caller = _activeCall.value.caller,
+                transcriptHistory = emptyList(),
+                latestUtterance = null,
+                knownClaims = emptyList(),
+                knownMemories = emptyList(),
+                objective = _activeCall.value.objective
+            )
+            _activeCall.update { it.copy(copilotResult = initialResult) }
+        }
     }
 
     private fun startCallTimer() {
@@ -352,101 +483,6 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
             while (true) {
                 delay(1000)
                 _activeCall.update { it.copy(elapsedSeconds = it.elapsedSeconds + 1) }
-            }
-        }
-    }
-
-    private fun startLiveDialogueStream() {
-        simulationScriptJob?.cancel()
-        simulationScriptJob = viewModelScope.launch {
-            val isSarah = _activeCall.value.caller?.name?.contains("Sarah", true) == true
-            val callerName = _activeCall.value.caller?.name ?: "Sarah"
-
-            // Seed initial transcript turns matching user request scenario
-            val script = if (isSarah) {
-                listOf(
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "Hey, thanks for jumping on. I wanted to sync regarding our milestone schedule.",
-                        timestamp = "00:12:30",
-                        linguisticDistance = 0.15f,
-                        stressLevel = 0.20f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.YOU,
-                        speakerName = "You",
-                        text = "Good to connect. Are we still on track to review the deliverables this week?",
-                        timestamp = "00:12:35",
-                        linguisticDistance = 0.10f,
-                        stressLevel = 0.15f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "I never said the meeting was Friday.",
-                        timestamp = "00:12:43",
-                        linguisticDistance = 0.65f,
-                        stressLevel = 0.72f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.YOU,
-                        speakerName = "You",
-                        text = "What date did you have in mind?",
-                        timestamp = "00:12:51",
-                        linguisticDistance = 0.12f,
-                        stressLevel = 0.18f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "Also just a quick heads up—I am moving to Seattle in October.",
-                        timestamp = "00:13:05",
-                        linguisticDistance = 0.18f,
-                        stressLevel = 0.25f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "And for the kickoff record, I started the project in May.",
-                        timestamp = "00:13:18",
-                        linguisticDistance = 0.70f,
-                        stressLevel = 0.68f
-                    )
-                )
-            } else {
-                listOf(
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "Hello, thanks for taking the call. Let's discuss our target allocation.",
-                        timestamp = "00:01:10",
-                        linguisticDistance = 0.20f,
-                        stressLevel = 0.25f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.YOU,
-                        speakerName = "You",
-                        text = "Happy to review the term sheet details.",
-                        timestamp = "00:01:18",
-                        linguisticDistance = 0.10f,
-                        stressLevel = 0.15f
-                    ),
-                    TranscriptSegment(
-                        speaker = Speaker.OTHER,
-                        speakerName = callerName,
-                        text = "We require a formal board observer seat for the next financing round.",
-                        timestamp = "00:01:28",
-                        linguisticDistance = 0.45f,
-                        stressLevel = 0.50f
-                    )
-                )
-            }
-
-            // Stream dialogue turns progressively
-            for (item in script) {
-                delay(2400)
-                addTranscriptTurn(item)
             }
         }
     }
@@ -472,8 +508,8 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
             _activeCall.update {
                 it.copy(
                     copilotResult = result,
-                    selectedAlternative = null,
                     activeInconsistency = result.inconsistencyAlert ?: it.activeInconsistency,
+                    selectedAlternative = null,
                     activeMemoryAlert = result.memoryCandidateAlert ?: it.activeMemoryAlert
                 )
             }
@@ -497,10 +533,14 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
         val timeFormatted = formatCallDuration(_activeCall.value.elapsedSeconds)
         val name = if (isYou) "You" else (_activeCall.value.caller?.name ?: "Contact")
         val segment = TranscriptSegment(
+            id = UUID.randomUUID().toString(),
             speaker = if (isYou) Speaker.YOU else Speaker.OTHER,
             speakerName = name,
             text = text.trim(),
-            timestamp = timeFormatted
+            timestamp = timeFormatted,
+            isFinal = true,
+            linguisticDistance = 0.2f,
+            stressLevel = 0.2f
         )
         addTranscriptTurn(segment)
     }
@@ -533,19 +573,17 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
         _activeCall.update { it.copy(activeMemoryAlert = null) }
     }
 
-    fun dismissInconsistencyAlert() {
-        _activeCall.update { it.copy(activeInconsistency = null) }
-    }
-
     fun toggleMute() {
         val newMute = !_activeCall.value.isMuted
         CallManager.setMuted(newMute)
+        CallService.toggleMute()
         _activeCall.update { it.copy(isMuted = newMute) }
     }
 
     fun toggleSpeaker() {
         val newSpeaker = !_activeCall.value.isSpeakerOn
         CallManager.setSpeakerphone(newSpeaker)
+        CallService.toggleSpeaker(getApplication())
         _activeCall.update { it.copy(isSpeakerOn = newSpeaker) }
     }
 
@@ -566,13 +604,33 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
     fun appendDtmf(char: String) {
         if (char.isNotEmpty()) {
             CallManager.playDtmf(char[0])
+            val activeTwilio = _activeCall.value.twilioCallSid
+            if (activeTwilio != null) {
+                val sid = cryptoManager.getTwilioSid()
+                val token = cryptoManager.getTwilioToken()
+                viewModelScope.launch {
+                    twilioService.sendDtmf(sid, token, activeTwilio, char)
+                }
+            }
         }
         _activeCall.update { it.copy(keypadDtmf = it.keypadDtmf + char) }
     }
 
     fun endActiveCall() {
-        CallManager.endCall()
+        transcriber.stopStreaming()
+        CallService.disconnectCall()
+
         val current = _activeCall.value
+        if (current.isTwilioCall && current.twilioCallSid != null) {
+            val sid = cryptoManager.getTwilioSid()
+            val token = cryptoManager.getTwilioToken()
+            viewModelScope.launch {
+                twilioService.endCall(sid, token, current.twilioCallSid)
+            }
+        } else {
+            CallManager.endCall()
+        }
+
         stopCallTimers()
 
         val durationFormatted = formatCallDuration(current.elapsedSeconds)
@@ -584,22 +642,21 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
             durationSeconds = current.elapsedSeconds,
             topics = current.objective,
             importantStatements = if (current.transcript.isNotEmpty()) {
-                current.transcript.joinToString("; ") { "${it.speakerName}: \"${it.text}\"" }
-            } else "Brief discussion on project deliverable timeline and schedule alignment.",
-            claims = if (current.activeInconsistency != null) {
-                "Stated project start was in ${current.activeInconsistency.currentStatement} (Previous baseline was ${current.activeInconsistency.previousStatement})"
-            } else "Confirmed deliverable review and milestone velocity.",
-            commitments = current.caller?.recentCommitment?.ifBlank { "Follow up regarding confirmed timeline" }
-                ?: "Follow up regarding confirmed timeline",
-            questionsAnswered = "Timeline discrepancies identified and clarified.",
-            questionsUnresolved = current.caller?.openQuestions ?: "Did Project X launch?",
-            potentialInconsistencies = current.activeInconsistency?.let {
+                current.transcript.joinToString("; ") { "${it.speaker}: \"${it.text}\"" }
+            } else "Call completed.",
+            claims = current.copilotResult?.inconsistencyAlert?.let {
+                "Inconsistency flagged: ${it.currentStatement} (vs baseline: ${it.previousStatement})"
+            } ?: "No verified conflicting claims flagged.",
+            commitments = current.caller?.recentCommitment?.ifBlank { "Follow up as required" } ?: "Follow up as required",
+            questionsAnswered = "Call consultation concluded.",
+            questionsUnresolved = current.caller?.openQuestions ?: "None recorded",
+            potentialInconsistencies = current.copilotResult?.inconsistencyAlert?.let {
                 "Previous: ${it.previousStatement} vs Current: ${it.currentStatement} (${it.confidence}% confidence)"
-            } ?: "No critical inconsistencies recorded.",
-            deceptionSignalsSummary = "Average signal score: ${current.copilotResult?.deceptionSignal?.score ?: 22}% (${current.copilotResult?.deceptionSignal?.label ?: "EXPERIMENTAL SIGNAL"})",
-            newMemoriesCreated = current.activeMemoryAlert?.statement ?: "No new memory candidates logged.",
-            recommendedFollowUps = "Schedule follow-up check-in to confirm deliverable submission.",
-            strategiesUsed = "COGNITIVE PROBE, MIRRORING, BONDING, CLARIFY"
+            } ?: "None detected",
+            deceptionSignalsSummary = "Composite signal average: ${current.copilotResult?.deceptionSignal?.score ?: 0}%",
+            newMemoriesCreated = current.activeMemoryAlert?.statement ?: "None",
+            recommendedFollowUps = "Review call intelligence notes.",
+            strategiesUsed = current.copilotResult?.recommendedStrategy?.displayName ?: "CONVERSATION COPILOT"
         )
 
         _postCallSummary.value = summary
@@ -614,7 +671,7 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
                     personId = current.caller?.id,
                     personName = current.caller?.name ?: "Unknown",
                     phoneNumber = current.phoneNumber,
-                    callType = "OUTGOING",
+                    callType = if (current.isTwilioCall) "TWILIO_VOICE" else "OUTGOING",
                     timestamp = System.currentTimeMillis(),
                     durationSeconds = summary.durationSeconds,
                     topic = summary.topics,
@@ -629,13 +686,13 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
                     newMemoriesCreated = summary.newMemoriesCreated,
                     recommendedFollowUps = summary.recommendedFollowUps,
                     strategiesUsed = summary.strategiesUsed,
-                    deceptionAvgScore = current.copilotResult?.deceptionSignal?.score ?: 20,
+                    deceptionAvgScore = current.copilotResult?.deceptionSignal?.score ?: 0,
                     transcriptJson = ""
                 )
             )
 
             // If an inconsistency claim was flagged, save it
-            current.activeInconsistency?.let { inc ->
+            current.copilotResult?.inconsistencyAlert?.let { inc ->
                 claimDao.insertClaim(
                     ClaimEntity(
                         personId = current.caller?.id,
@@ -671,10 +728,25 @@ class RealityEngineViewModel(application: Application) : AndroidViewModel(applic
 
     private fun stopCallTimers() {
         callTimerJob?.cancel()
-        simulationScriptJob?.cancel()
     }
 
-    // Person & Contact management
+    // Contacts & Device Sync
+    fun syncContactsFromDevice() {
+        viewModelScope.launch {
+            _syncStatusMessage.value = "Scanning device contacts..."
+            try {
+                val count = contactsManager.syncDeviceContactsToRoom()
+                _syncStatusMessage.value = "Synced $count new contacts from device."
+                delay(3000)
+                _syncStatusMessage.value = null
+            } catch (e: Exception) {
+                _syncStatusMessage.value = "Sync failed: ${e.message}"
+                delay(3000)
+                _syncStatusMessage.value = null
+            }
+        }
+    }
+
     fun savePerson(person: PersonEntity) {
         viewModelScope.launch {
             if (person.id == 0L) {

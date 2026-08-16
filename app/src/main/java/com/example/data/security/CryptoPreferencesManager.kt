@@ -2,137 +2,111 @@ package com.example.data.security
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.security.KeyStore
 import java.util.concurrent.TimeUnit
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 class CryptoPreferencesManager(private val context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("reality_engine_secure_prefs", Context.MODE_PRIVATE)
+    private val masterKey: MasterKey by lazy {
+        MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+    }
 
-    private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
-        load(null)
+    private val prefs: SharedPreferences by lazy {
+        try {
+            EncryptedSharedPreferences.create(
+                context,
+                SECURE_PREFS_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error opening EncryptedSharedPreferences, resetting secure vault: ${e.message}")
+            context.getSharedPreferences(SECURE_PREFS_FILE, Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            EncryptedSharedPreferences.create(
+                context,
+                SECURE_PREFS_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .build()
-
-    init {
-        ensureKeyExists()
-    }
-
-    private fun ensureKeyExists() {
-        if (!keyStore.containsAlias(KEY_ALIAS)) {
-            val keyGenerator =
-                KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            val keyGenSpec = KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build()
-            keyGenerator.init(keyGenSpec)
-            keyGenerator.generateKey()
-        }
-    }
-
-    private fun encrypt(plainText: String): String {
-        if (plainText.isEmpty()) return ""
-        try {
-            val secretKey = keyStore.getKey(KEY_ALIAS, null) as SecretKey
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
-            val iv = cipher.iv
-            val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-            val combined = ByteArray(iv.size + cipherText.size)
-            System.arraycopy(iv, 0, combined, 0, iv.size)
-            System.arraycopy(cipherText, 0, combined, iv.size, cipherText.size)
-            return Base64.encodeToString(combined, Base64.NO_WRAP)
-        } catch (e: Exception) {
-            Log.e(TAG, "Encryption error: ${e.message}", e)
-            return ""
-        }
-    }
-
-    private fun decrypt(encryptedBase64: String): String {
-        if (encryptedBase64.isEmpty()) return ""
-        try {
-            val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
-            if (combined.size < 12) return ""
-            val iv = ByteArray(12)
-            val cipherText = ByteArray(combined.size - 12)
-            System.arraycopy(combined, 0, iv, 0, 12)
-            System.arraycopy(combined, 12, cipherText, 0, cipherText.size)
-
-            val secretKey = keyStore.getKey(KEY_ALIAS, null) as SecretKey
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = GCMParameterSpec(128, iv)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec)
-            val plainTextBytes = cipher.doFinal(cipherText)
-            return String(plainTextBytes, Charsets.UTF_8)
-        } catch (e: Exception) {
-            Log.e(TAG, "Decryption error: ${e.message}", e)
-            return ""
-        }
-    }
 
     // Encrypted API Credentials Getters & Setters
     fun saveTwilioSid(sid: String) {
-        prefs.edit().putString(PREF_TWILIO_SID, encrypt(sid.trim())).apply()
+        prefs.edit().putString(PREF_TWILIO_SID, sid.trim()).apply()
     }
-    fun getTwilioSid(): String = decrypt(prefs.getString(PREF_TWILIO_SID, "") ?: "")
+    fun getTwilioSid(): String = prefs.getString(PREF_TWILIO_SID, "") ?: ""
 
     fun saveTwilioToken(token: String) {
-        prefs.edit().putString(PREF_TWILIO_TOKEN, encrypt(token.trim())).apply()
+        prefs.edit().putString(PREF_TWILIO_TOKEN, token.trim()).apply()
     }
-    fun getTwilioToken(): String = decrypt(prefs.getString(PREF_TWILIO_TOKEN, "") ?: "")
+    fun getTwilioToken(): String = prefs.getString(PREF_TWILIO_TOKEN, "") ?: ""
 
     fun saveTwilioPhoneNumber(number: String) {
-        prefs.edit().putString(PREF_TWILIO_PHONE, encrypt(number.trim())).apply()
+        prefs.edit().putString(PREF_TWILIO_PHONE, number.trim()).apply()
     }
-    fun getTwilioPhoneNumber(): String = decrypt(prefs.getString(PREF_TWILIO_PHONE, "") ?: "")
+    fun getTwilioPhoneNumber(): String = prefs.getString(PREF_TWILIO_PHONE, "") ?: ""
 
     fun saveDeepgramKey(apiKey: String) {
-        prefs.edit().putString(PREF_DEEPGRAM_KEY, encrypt(apiKey.trim())).apply()
+        prefs.edit().putString(PREF_DEEPGRAM_KEY, apiKey.trim()).apply()
     }
-    fun getDeepgramKey(): String = decrypt(prefs.getString(PREF_DEEPGRAM_KEY, "") ?: "")
+    fun getDeepgramKey(): String = prefs.getString(PREF_DEEPGRAM_KEY, "") ?: ""
 
     fun saveGroqKey(apiKey: String) {
-        prefs.edit().putString(PREF_GROQ_KEY, encrypt(apiKey.trim())).apply()
+        prefs.edit().putString(PREF_GROQ_KEY, apiKey.trim()).apply()
     }
-    fun getGroqKey(): String = decrypt(prefs.getString(PREF_GROQ_KEY, "") ?: "")
+    fun getGroqKey(): String = prefs.getString(PREF_GROQ_KEY, "") ?: ""
 
     fun saveGroqModel(model: String) {
         prefs.edit().putString(PREF_GROQ_MODEL, model.trim()).apply()
     }
     fun getGroqModel(): String =
-        prefs.getString(PREF_GROQ_MODEL, "meta/llama-3.1-8b-instant") ?: "meta/llama-3.1-8b-instant"
+        prefs.getString(PREF_GROQ_MODEL, "llama-3.1-8b-instant") ?: "llama-3.1-8b-instant"
 
     fun saveSupabaseUrl(url: String) {
-        prefs.edit().putString(PREF_SUPABASE_URL, encrypt(url.trim())).apply()
+        prefs.edit().putString(PREF_SUPABASE_URL, url.trim()).apply()
     }
-    fun getSupabaseUrl(): String = decrypt(prefs.getString(PREF_SUPABASE_URL, "") ?: "")
+    fun getSupabaseUrl(): String = prefs.getString(PREF_SUPABASE_URL, "") ?: ""
 
     fun saveSupabaseAnonKey(anonKey: String) {
-        prefs.edit().putString(PREF_SUPABASE_KEY, encrypt(anonKey.trim())).apply()
+        prefs.edit().putString(PREF_SUPABASE_KEY, anonKey.trim()).apply()
     }
-    fun getSupabaseAnonKey(): String = decrypt(prefs.getString(PREF_SUPABASE_KEY, "") ?: "")
+    fun getSupabaseAnonKey(): String = prefs.getString(PREF_SUPABASE_KEY, "") ?: ""
+
+    fun clearAllCredentials() {
+        prefs.edit()
+            .remove(PREF_TWILIO_SID)
+            .remove(PREF_TWILIO_TOKEN)
+            .remove(PREF_TWILIO_PHONE)
+            .remove(PREF_DEEPGRAM_KEY)
+            .remove(PREF_GROQ_KEY)
+            .remove(PREF_GROQ_MODEL)
+            .remove(PREF_SUPABASE_URL)
+            .remove(PREF_SUPABASE_KEY)
+            .apply()
+    }
+
+    fun hasTwilioConfig(): Boolean = getTwilioSid().isNotBlank() && getTwilioToken().isNotBlank()
+    fun hasDeepgramConfig(): Boolean = getDeepgramKey().isNotBlank()
+    fun hasGroqConfig(): Boolean = getGroqKey().isNotBlank()
+    fun hasSupabaseConfig(): Boolean = getSupabaseUrl().isNotBlank() && getSupabaseAnonKey().isNotBlank()
 
     // Mask helper
     fun maskSecret(secret: String): String {
@@ -171,102 +145,112 @@ class CryptoPreferencesManager(private val context: Context) {
     // Real API Test Probes
     suspend fun testTwilio(sid: String, token: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (sid.isBlank() || token.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Account SID and Token are required"))
+            val cleanSid = sid.trim()
+            val cleanToken = token.trim()
+            if (cleanSid.isBlank() || cleanToken.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Account SID and Auth Token are required"))
             }
-            val credential = okhttp3.Credentials.basic(sid, token)
+            if (!cleanSid.startsWith("AC")) {
+                return@withContext Result.failure(IllegalArgumentException("Account SID must start with 'AC'"))
+            }
+
+            val credential = Credentials.basic(cleanSid, cleanToken)
             val request = Request.Builder()
-                .url("https://api.twilio.com/2010-04-01/Accounts/$sid.json")
+                .url("https://api.twilio.com/2010-04-01/Accounts/$cleanSid.json")
                 .header("Authorization", credential)
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    Result.success("Twilio Connected: Account active (${response.code})")
+                    Result.success("Twilio Connected: Account verified active (HTTP ${response.code})")
                 } else {
-                    Result.failure(Exception("Twilio Auth Failed: HTTP ${response.code}"))
+                    Result.failure(Exception("Twilio Auth Failed: HTTP ${response.code} (${response.message})"))
                 }
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Twilio Connection Error: ${e.localizedMessage}"))
+            Result.failure(Exception("Twilio Connection Error: ${e.localizedMessage ?: e.message}"))
         }
     }
 
     suspend fun testDeepgram(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
+            val cleanKey = apiKey.trim()
+            if (cleanKey.isBlank()) {
                 return@withContext Result.failure(IllegalArgumentException("Deepgram API Key is required"))
             }
             val request = Request.Builder()
                 .url("https://api.deepgram.com/v1/projects")
-                .header("Authorization", "Token $apiKey")
+                .header("Authorization", "Token $cleanKey")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    Result.success("Deepgram Connected: API Key valid (${response.code})")
+                    Result.success("Deepgram Connected: Nova-2 API verified (HTTP ${response.code})")
                 } else {
-                    Result.failure(Exception("Deepgram Auth Failed: HTTP ${response.code}"))
+                    Result.failure(Exception("Deepgram Auth Failed: HTTP ${response.code} (${response.message})"))
                 }
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Deepgram Connection Error: ${e.localizedMessage}"))
+            Result.failure(Exception("Deepgram Connection Error: ${e.localizedMessage ?: e.message}"))
         }
     }
 
     suspend fun testGroq(apiKey: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
+            val cleanKey = apiKey.trim()
+            if (cleanKey.isBlank()) {
                 return@withContext Result.failure(IllegalArgumentException("Groq API Key is required"))
             }
             val request = Request.Builder()
                 .url("https://api.groq.com/openai/v1/models")
-                .header("Authorization", "Bearer $apiKey")
+                .header("Authorization", "Bearer $cleanKey")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    Result.success("Groq Connected: Llama-3.1 API ready (${response.code})")
+                    Result.success("Groq Connected: Llama-3.1 inference engine ready (HTTP ${response.code})")
                 } else {
-                    Result.failure(Exception("Groq Auth Failed: HTTP ${response.code}"))
+                    Result.failure(Exception("Groq Auth Failed: HTTP ${response.code} (${response.message})"))
                 }
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Groq Connection Error: ${e.localizedMessage}"))
+            Result.failure(Exception("Groq Connection Error: ${e.localizedMessage ?: e.message}"))
         }
     }
 
     suspend fun testSupabase(url: String, anonKey: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (url.isBlank() || anonKey.isBlank()) {
+            val cleanUrl = url.trim()
+            val cleanKey = anonKey.trim()
+            if (cleanUrl.isBlank() || cleanKey.isBlank()) {
                 return@withContext Result.failure(IllegalArgumentException("Supabase URL and Anon Key are required"))
             }
-            val normalizedUrl = if (url.endsWith("/")) url else "$url/"
+            val normalizedUrl = if (cleanUrl.endsWith("/")) cleanUrl else "$cleanUrl/"
             val request = Request.Builder()
                 .url("${normalizedUrl}rest/v1/")
-                .header("apikey", anonKey)
-                .header("Authorization", "Bearer $anonKey")
+                .header("apikey", cleanKey)
+                .header("Authorization", "Bearer $cleanKey")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful || response.code == 404 || response.code == 200) {
-                    Result.success("Supabase Connected: Endpoint reached (${response.code})")
+                    Result.success("Supabase Connected: REST endpoint accessible (HTTP ${response.code})")
                 } else {
-                    Result.failure(Exception("Supabase Auth Failed: HTTP ${response.code}"))
+                    Result.failure(Exception("Supabase Auth Failed: HTTP ${response.code} (${response.message})"))
                 }
             }
         } catch (e: Exception) {
-            Result.failure(Exception("Supabase Connection Error: ${e.localizedMessage}"))
+            Result.failure(Exception("Supabase Connection Error: ${e.localizedMessage ?: e.message}"))
         }
     }
 
     companion object {
         private const val TAG = "CryptoPreferences"
-        private const val KEY_ALIAS = "RealityEngineKeyStoreKeyV2"
+        private const val SECURE_PREFS_FILE = "reality_engine_secure_vault"
 
         private const val PREF_TWILIO_SID = "enc_twilio_sid"
         private const val PREF_TWILIO_TOKEN = "enc_twilio_token"

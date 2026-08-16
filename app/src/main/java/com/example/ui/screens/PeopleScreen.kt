@@ -98,8 +98,10 @@ fun PeopleScreen(
                 onSettingsClick = { viewModel.openSettings(true) }
             )
 
-            // Search Bar
-            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            // Search Bar & Sync Action
+            val syncMessage by viewModel.syncStatusMessage.collectAsState()
+
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -129,6 +131,41 @@ fun PeopleScreen(
                     ),
                     singleLine = true
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = syncMessage ?: "DEVICE CONTACTS INTEGRATION",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = if (syncMessage != null) RealityEngineAmber else RealityEngineTextMuted,
+                            fontSize = 10.sp
+                        )
+                    )
+
+                    Button(
+                        onClick = { viewModel.syncContactsFromDevice() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RealityEngineSurfaceElevated,
+                            contentColor = RealityEngineCyan
+                        ),
+                        modifier = Modifier.testTag("sync_contacts_button")
+                    ) {
+                        Text(
+                            text = "SYNC DEVICE CONTACTS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            )
+                        )
+                    }
+                }
             }
 
             // People List

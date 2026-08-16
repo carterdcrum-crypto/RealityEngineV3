@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.telecom.InCallService
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import android.util.Log
@@ -14,20 +15,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class TelecomCallState {
-    IDLE,
-    RINGING,
-    DIALING,
-    CONNECTING,
-    ACTIVE,
-    HOLDING,
-    DISCONNECTED
-}
-
 data class TelecomCallInfo(
     val phoneNumber: String = "",
     val displayName: String = "",
-    val state: TelecomCallState = TelecomCallState.IDLE,
+    val state: CallState = CallState.IDLE,
     val isIncoming: Boolean = false
 )
 
@@ -40,7 +31,7 @@ object CallManager {
     private val _callInfo = MutableStateFlow<TelecomCallInfo?>(null)
     val callInfo: StateFlow<TelecomCallInfo?> = _callInfo.asStateFlow()
 
-    private var inCallServiceInstance: TelecomInCallService? = null
+    private var inCallServiceInstance: InCallService? = null
 
     private val callback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
@@ -54,7 +45,7 @@ object CallManager {
         }
     }
 
-    fun bindInCallService(service: TelecomInCallService) {
+    fun bindInCallService(service: InCallService) {
         inCallServiceInstance = service
     }
 
@@ -84,7 +75,7 @@ object CallManager {
         call.unregisterCallback(callback)
         if (_activeCall.value == call) {
             _activeCall.value = null
-            _callInfo.value = _callInfo.value?.copy(state = TelecomCallState.DISCONNECTED)
+            _callInfo.value = _callInfo.value?.copy(state = CallState.DISCONNECTED)
         }
     }
 
@@ -97,27 +88,15 @@ object CallManager {
         _callInfo.value = TelecomCallInfo(
             phoneNumber = phoneNumber,
             displayName = displayName,
-            state = mapTelecomState(call.state),
+            state = CallState.fromTelecomState(call.state),
             isIncoming = isIncoming
         )
     }
 
     private fun updateCallState(call: Call, state: Int) {
-        val mappedState = mapTelecomState(state)
+        val mappedState = CallState.fromTelecomState(state)
         Log.d(TAG, "Call state changed to: $mappedState (code $state)")
         _callInfo.value = _callInfo.value?.copy(state = mappedState) ?: TelecomCallInfo(state = mappedState)
-    }
-
-    private fun mapTelecomState(state: Int): TelecomCallState {
-        return when (state) {
-            Call.STATE_RINGING -> TelecomCallState.RINGING
-            Call.STATE_DIALING -> TelecomCallState.DIALING
-            Call.STATE_CONNECTING -> TelecomCallState.CONNECTING
-            Call.STATE_ACTIVE -> TelecomCallState.ACTIVE
-            Call.STATE_HOLDING -> TelecomCallState.HOLDING
-            Call.STATE_DISCONNECTED -> TelecomCallState.DISCONNECTED
-            else -> TelecomCallState.IDLE
-        }
     }
 
     // Call Actions

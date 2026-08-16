@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,11 +24,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +77,7 @@ import com.example.ui.theme.RealityEngineBorder
 import com.example.ui.theme.RealityEngineCyan
 import com.example.ui.theme.RealityEngineDarkBg
 import com.example.ui.theme.RealityEngineEmerald
+import com.example.ui.theme.RealityEngineCrimson
 import com.example.ui.theme.RealityEngineSurface
 import com.example.ui.theme.RealityEngineSurfaceElevated
 import com.example.ui.theme.RealityEngineTextDisabled
@@ -99,6 +110,8 @@ fun SettingsScreen(
 
     var supabaseUrl by remember { mutableStateOf(cryptoManager.getSupabaseUrl()) }
     var supabaseAnonKey by remember { mutableStateOf(cryptoManager.getSupabaseAnonKey()) }
+
+    var saveConfirmationMessage by remember { mutableStateOf<String?>(null) }
 
     // Toggles
     var aiEnabled by remember { mutableStateOf(cryptoManager.isAiAnalysisEnabled) }
@@ -147,14 +160,23 @@ fun SettingsScreen(
                         color = RealityEngineTextPrimary
                     )
                 )
-                Text(
-                    text = "HARDWARE KEYSTORE ENCRYPTED",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp,
-                        color = RealityEngineCyan
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = RealityEngineCyan,
+                        modifier = Modifier.size(11.dp)
                     )
-                )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "ENCRYPTED SHARED PREFERENCES (AES-256 GCM)",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            color = RealityEngineCyan
+                        )
+                    )
+                }
             }
         }
 
@@ -187,6 +209,54 @@ fun SettingsScreen(
                         )
                     }
                 )
+            }
+        }
+
+        // Save confirmation toast bar
+        AnimatedVisibility(
+            visible = saveConfirmationMessage != null,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            saveConfirmationMessage?.let { msg ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(RealityEngineEmerald.copy(alpha = 0.15f))
+                        .border(1.dp, RealityEngineEmerald.copy(alpha = 0.4f), RoundedCornerShape(0.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = RealityEngineEmerald,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = RealityEngineEmerald,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                    IconButton(
+                        onClick = { saveConfirmationMessage = null },
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = RealityEngineEmerald,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -239,16 +309,29 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Button(
                                         onClick = onRequestDefaultPhone,
-                                        modifier = Modifier.fillMaxWidth().height(38.dp).testTag("settings_set_default_phone_button"),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(38.dp)
+                                            .testTag("settings_set_default_phone_button"),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = RealityEngineAmber,
                                             contentColor = RealityEngineDarkBg
                                         ),
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Icon(imageVector = Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp), tint = RealityEngineDarkBg)
+                                        Icon(
+                                            imageVector = Icons.Default.Phone,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = RealityEngineDarkBg
+                                        )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("SET AS DEFAULT PHONE", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        Text(
+                                            "SET AS DEFAULT PHONE",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
                                     }
                                 }
                             }
@@ -340,157 +423,315 @@ fun SettingsScreen(
                     item {
                         PrecisionCard {
                             Column {
-                                PrecisionSectionHeader(title = "SECURITY ARCHITECTURE", tag = "AES-GCM", tagColor = RealityEngineEmerald)
+                                PrecisionSectionHeader(title = "SECURITY ARCHITECTURE", tag = "AES-256 GCM", tagColor = RealityEngineEmerald)
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", tint = RealityEngineEmerald, modifier = Modifier.size(16.dp))
+                                    Icon(imageVector = Icons.Default.Security, contentDescription = "Security", tint = RealityEngineEmerald, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "Keystore Key Alias: reality_engine_master_key",
+                                        text = "Vault: EncryptedSharedPreferences (AndroidKeyStore MasterKey)",
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, color = RealityEngineEmerald)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "All API tokens are encrypted in hardware-backed Android KeyStore before touching disk. Keys are never logged or exported.",
+                                    text = "All API tokens, Twilio credentials, and endpoints are encrypted at rest using AES-256 GCM before touching disk. Keys are never logged, exported, or transmitted off-device.",
                                     style = MaterialTheme.typography.bodySmall.copy(color = RealityEngineTextSecondary, fontSize = 11.sp)
                                 )
                             }
                         }
                     }
                 }
-                4 -> { // API CONFIGURATION (Full Key Vault)
-                    // TWILIO
+                4 -> { // API CONFIGURATION (Full Key Vault Form)
                     item {
+                        // VAULT SUMMARY BANNER
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(RealityEngineSurfaceElevated)
+                                .border(1.dp, RealityEngineCyan.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.VpnKey,
+                                    contentDescription = null,
+                                    tint = RealityEngineCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "SECURE CREDENTIALS VAULT",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = RealityEngineCyan
+                                        )
+                                    )
+                                    Text(
+                                        text = "Encrypted in hardware with AES-256-GCM via MasterKey. Enter your API credentials below and test connectivity.",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            color = RealityEngineTextSecondary,
+                                            fontSize = 10.sp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 1. TWILIO TELEPHONY
+                    item {
+                        val isTwilioSet = twilioSid.isNotBlank() && twilioToken.isNotBlank()
                         PrecisionCard {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                PrecisionSectionHeader(title = "TWILIO VOICE & SIP", tag = "TELEPHONY", tagColor = RealityEngineAmber)
+                                PrecisionSectionHeader(
+                                    title = "TWILIO VOICE & SIP",
+                                    tag = if (isTwilioSet) "CONFIGURED" else "REQUIRED",
+                                    tagColor = if (isTwilioSet) RealityEngineEmerald else RealityEngineAmber
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
-                                    label = "Twilio Account SID (AC...)",
+                                    label = "Twilio Account SID (starts with AC...)",
                                     value = twilioSid,
+                                    testTag = "settings_input_twilio_sid",
                                     onValueChange = {
                                         twilioSid = it
                                         cryptoManager.saveTwilioSid(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
                                     label = "Twilio Auth Token",
                                     value = twilioToken,
                                     isSecret = true,
+                                    testTag = "settings_input_twilio_token",
                                     onValueChange = {
                                         twilioToken = it
                                         cryptoManager.saveTwilioToken(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
-                                    label = "Twilio Phone Number (+1...)",
+                                    label = "Twilio Phone Number (e.g. +14155552671)",
                                     value = twilioPhone,
+                                    testTag = "settings_input_twilio_phone",
                                     onValueChange = {
                                         twilioPhone = it
                                         cryptoManager.saveTwilioPhoneNumber(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 ApiTestButton(
+                                    serviceName = "TWILIO",
                                     isLoading = apiTestState.isTestingTwilio,
                                     statusText = apiTestState.twilioStatus,
+                                    testTag = "settings_test_twilio_button",
                                     onClick = { viewModel.testTwilioApi(twilioSid, twilioToken) }
                                 )
                             }
                         }
                     }
 
-                    // DEEPGRAM
+                    // 2. DEEPGRAM SPEECH RECOGNITION
                     item {
+                        val isDeepgramSet = deepgramKey.isNotBlank()
                         PrecisionCard {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                PrecisionSectionHeader(title = "DEEPGRAM NOVA-2", tag = "TRANSCRIPTION", tagColor = RealityEngineCyan)
+                                PrecisionSectionHeader(
+                                    title = "DEEPGRAM NOVA-2",
+                                    tag = if (isDeepgramSet) "CONFIGURED" else "REQUIRED",
+                                    tagColor = if (isDeepgramSet) RealityEngineEmerald else RealityEngineCyan
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
                                     label = "Deepgram API Key",
                                     value = deepgramKey,
                                     isSecret = true,
+                                    testTag = "settings_input_deepgram_key",
                                     onValueChange = {
                                         deepgramKey = it
                                         cryptoManager.saveDeepgramKey(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 ApiTestButton(
+                                    serviceName = "DEEPGRAM",
                                     isLoading = apiTestState.isTestingDeepgram,
                                     statusText = apiTestState.deepgramStatus,
+                                    testTag = "settings_test_deepgram_button",
                                     onClick = { viewModel.testDeepgramApi(deepgramKey) }
                                 )
                             }
                         }
                     }
 
-                    // GROQ
+                    // 3. GROQ LLM INFERENCE
                     item {
+                        val isGroqSet = groqKey.isNotBlank()
                         PrecisionCard {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                PrecisionSectionHeader(title = "GROQ LLAMA-3.1", tag = "AI ENGINE", tagColor = RealityEngineAmber)
+                                PrecisionSectionHeader(
+                                    title = "GROQ LLAMA-3.1",
+                                    tag = if (isGroqSet) "CONFIGURED" else "REQUIRED",
+                                    tagColor = if (isGroqSet) RealityEngineEmerald else RealityEngineAmber
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
-                                    label = "Groq API Key (gsk_...)",
+                                    label = "Groq API Key (starts with gsk_...)",
                                     value = groqKey,
                                     isSecret = true,
+                                    testTag = "settings_input_groq_key",
                                     onValueChange = {
                                         groqKey = it
                                         cryptoManager.saveGroqKey(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
-                                    label = "Model (e.g. llama-3.1-8b-instant)",
+                                    label = "Model Name (e.g. llama-3.1-8b-instant)",
                                     value = groqModel,
+                                    testTag = "settings_input_groq_model",
                                     onValueChange = {
                                         groqModel = it
                                         cryptoManager.saveGroqModel(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 ApiTestButton(
+                                    serviceName = "GROQ",
                                     isLoading = apiTestState.isTestingGroq,
                                     statusText = apiTestState.groqStatus,
+                                    testTag = "settings_test_groq_button",
                                     onClick = { viewModel.testGroqApi(groqKey) }
                                 )
                             }
                         }
                     }
 
-                    // SUPABASE
+                    // 4. SUPABASE POSTGRESQL (OPTIONAL PERSISTENCE)
                     item {
+                        val isSupabaseSet = supabaseUrl.isNotBlank() && supabaseAnonKey.isNotBlank()
                         PrecisionCard {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                PrecisionSectionHeader(title = "SUPABASE POSTGRESQL", tag = "PERSISTENCE", tagColor = RealityEngineEmerald)
+                                PrecisionSectionHeader(
+                                    title = "SUPABASE POSTGRESQL",
+                                    tag = if (isSupabaseSet) "CONFIGURED" else "OPTIONAL",
+                                    tagColor = if (isSupabaseSet) RealityEngineEmerald else RealityEngineTextMuted
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
-                                    label = "Supabase Project URL (https://...supabase.co)",
+                                    label = "Supabase Project URL (https://xyz.supabase.co)",
                                     value = supabaseUrl,
+                                    testTag = "settings_input_supabase_url",
                                     onValueChange = {
                                         supabaseUrl = it
                                         cryptoManager.saveSupabaseUrl(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 EncryptedInputField(
                                     label = "Supabase Anon Public Key",
                                     value = supabaseAnonKey,
                                     isSecret = true,
+                                    testTag = "settings_input_supabase_key",
                                     onValueChange = {
                                         supabaseAnonKey = it
                                         cryptoManager.saveSupabaseAnonKey(it)
                                     }
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 ApiTestButton(
+                                    serviceName = "SUPABASE",
                                     isLoading = apiTestState.isTestingSupabase,
                                     statusText = apiTestState.supabaseStatus,
+                                    testTag = "settings_test_supabase_button",
                                     onClick = { viewModel.testSupabaseApi(supabaseUrl, supabaseAnonKey) }
+                                )
+                            }
+                        }
+                    }
+
+                    // 5. GLOBAL VAULT ACTIONS
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    cryptoManager.saveTwilioSid(twilioSid)
+                                    cryptoManager.saveTwilioToken(twilioToken)
+                                    cryptoManager.saveTwilioPhoneNumber(twilioPhone)
+                                    cryptoManager.saveDeepgramKey(deepgramKey)
+                                    cryptoManager.saveGroqKey(groqKey)
+                                    cryptoManager.saveGroqModel(groqModel)
+                                    cryptoManager.saveSupabaseUrl(supabaseUrl)
+                                    cryptoManager.saveSupabaseAnonKey(supabaseAnonKey)
+                                    saveConfirmationMessage = "All credentials saved securely to EncryptedSharedPreferences."
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("settings_save_all_credentials_button"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = RealityEngineEmerald,
+                                    contentColor = RealityEngineDarkBg
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Save,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = RealityEngineDarkBg
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "SAVE ALL CREDENTIALS TO VAULT",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    cryptoManager.clearAllCredentials()
+                                    twilioSid = ""
+                                    twilioToken = ""
+                                    twilioPhone = ""
+                                    deepgramKey = ""
+                                    groqKey = ""
+                                    groqModel = "llama-3.1-8b-instant"
+                                    supabaseUrl = ""
+                                    supabaseAnonKey = ""
+                                    saveConfirmationMessage = "Encrypted Vault cleared."
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("settings_clear_vault_button"),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = RealityEngineCrimson
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, RealityEngineCrimson.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = RealityEngineCrimson
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "CLEAR ALL VAULT CREDENTIALS",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -510,6 +751,7 @@ private fun EncryptedInputField(
     label: String,
     value: String,
     isSecret: Boolean = false,
+    testTag: String = "",
     onValueChange: (String) -> Unit
 ) {
     var isPasswordVisible by remember { mutableStateOf(!isSecret) }
@@ -518,7 +760,9 @@ private fun EncryptedInputField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label, fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (testTag.isNotEmpty()) Modifier.testTag(testTag) else Modifier),
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             fontFamily = FontFamily.Monospace,
             color = RealityEngineTextPrimary,
@@ -527,7 +771,10 @@ private fun EncryptedInputField(
         visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
             if (isSecret) {
-                IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                IconButton(
+                    onClick = { isPasswordVisible = !isPasswordVisible },
+                    modifier = Modifier.testTag("${testTag}_visibility_toggle")
+                ) {
                     Icon(
                         imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = "Toggle Secret",
@@ -592,48 +839,74 @@ private fun SettingToggleRow(
 
 @Composable
 private fun ApiTestButton(
+    serviceName: String,
     isLoading: Boolean,
     statusText: String?,
+    testTag: String = "",
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedButton(
-            onClick = onClick,
-            enabled = !isLoading,
-            shape = RoundedCornerShape(6.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = RealityEngineAmber)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = RealityEngineAmber
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("TESTING...", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-            } else {
-                Icon(imageVector = Icons.Default.Refresh, contentDescription = "Test", modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("TEST CONNECTION", fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = onClick,
+                enabled = !isLoading,
+                shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = RealityEngineAmber),
+                modifier = if (testTag.isNotEmpty()) Modifier.testTag(testTag) else Modifier
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = RealityEngineAmber
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("CONNECTING...", fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                } else {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = "Test", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("TEST $serviceName CONNECTION", fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
         if (statusText != null) {
+            Spacer(modifier = Modifier.height(6.dp))
             val isSuccess = statusText.startsWith("✓")
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isSuccess) RealityEngineEmerald else RealityEngineAmber
-                ),
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (isSuccess) RealityEngineEmerald.copy(alpha = 0.1f) else RealityEngineAmber.copy(alpha = 0.1f))
+                    .border(
+                        1.dp,
+                        if (isSuccess) RealityEngineEmerald.copy(alpha = 0.3f) else RealityEngineAmber.copy(alpha = 0.3f),
+                        RoundedCornerShape(4.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = if (isSuccess) RealityEngineEmerald else RealityEngineAmber,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSuccess) RealityEngineEmerald else RealityEngineAmber
+                    )
+                )
+            }
         }
     }
 }

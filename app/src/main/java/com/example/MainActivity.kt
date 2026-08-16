@@ -165,6 +165,8 @@ fun RealityEngineApp(
             OutgoingCallScreen(
                 caller = activeCall.caller,
                 phoneNumber = activeCall.phoneNumber,
+                callState = activeCall.callState,
+                rawStatus = activeCall.rawTwilioStatus,
                 onEndCall = { viewModel.declineIncomingCall() }
             )
             return

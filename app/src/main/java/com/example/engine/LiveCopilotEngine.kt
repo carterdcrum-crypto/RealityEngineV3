@@ -18,6 +18,9 @@ import java.util.concurrent.TimeUnit
 class LiveCopilotEngine(
     private val cryptoManager: CryptoPreferencesManager
 ) {
+    companion object {
+        private const val TAG = "LiveCopilotEngine"
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -30,14 +33,28 @@ class LiveCopilotEngine(
         latestUtterance: TranscriptSegment?,
         knownClaims: List<ClaimEntity>,
         knownMemories: List<MemoryEntity>,
-        objective: String = "Align on deliverable timelines and verify commitments"
+        objective: String = "Verify commitments and maintain alignment"
     ): CopilotAnalysisResult = withContext(Dispatchers.Default) {
-
         val groqKey = cryptoManager.getGroqKey()
         val isAiEnabled = cryptoManager.isAiAnalysisEnabled
 
         if (!isAiEnabled) {
-            return@withContext defaultPassiveResult(latestUtterance?.speakerName ?: "Contact")
+            return@withContext defaultPassiveResult()
+        }
+
+        if (latestUtterance == null && transcriptHistory.isEmpty()) {
+            return@withContext CopilotAnalysisResult(
+                recommendedStrategy = StrategyType.DIRECT_RESPONSE,
+                tone = ToneType.CALM,
+                confidence = 80,
+                suggestedResponse = "Awaiting speech to generate live tactical response...",
+                reason = "Call connected. Listening for conversational context.",
+                alternatives = emptyList(),
+                liveSignals = LiveSignalMeters(0.1f, 0.1f, 0.1f),
+                deceptionSignal = DeceptionSignalState(score = 0, isElevated = false, contributors = emptyList(), whyExplanation = "Awaiting speech"),
+                inconsistencyAlert = null,
+                memoryCandidateAlert = null
+            )
         }
 
         if (groqKey.isNotBlank()) {
@@ -56,12 +73,12 @@ class LiveCopilotEngine(
                     return@withContext apiResult
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Groq Live Engine fallback invoked: ${e.message}")
+                Log.e(TAG, "Groq Live Engine error: ${e.message}")
             }
         }
 
-        // Fast high-precision deterministic copilot engine
-        return@withContext evaluateDeterministicCopilot(
+        // Real dynamic heuristic linguistic analysis based on actual speech input
+        return@withContext evaluateDynamicLinguisticCopilot(
             caller = caller,
             transcriptHistory = transcriptHistory,
             latest = latestUtterance,
@@ -82,7 +99,7 @@ class LiveCopilotEngine(
         objective: String
     ): CopilotAnalysisResult? = withContext(Dispatchers.IO) {
         val transcriptFormatted = transcript.takeLast(10).joinToString("\n") {
-            "[${it.timestamp}] ${it.speakerName}: \"${it.text}\""
+            "[${it.speakerName}]: \"${it.text}\""
         }
 
         val claimsSummary = knownClaims.joinToString("; ") {
@@ -107,12 +124,12 @@ class LiveCopilotEngine(
         }
 
         val systemPrompt = """
-            You are REALITY ENGINE v2, an ultra-precise tactical live conversation co-pilot.
-            Analyze the ongoing conversation and return ONLY valid JSON matching this schema:
+            You are REALITY ENGINE, an ultra-precise tactical live conversation co-pilot.
+            Analyze the real-time ongoing conversation and return ONLY valid JSON matching this schema:
             {
-              "recommended_strategy": "COGNITIVE PROBE" | "MIRRORING" | "PIVOT" | "BONDING" | "CLARIFY" | "CONFRONT" | "VALIDATE" | "CHALLENGE" | "DE-ESCALATE" | "PROBE" | "FOLLOW-UP" | "SUMMARIZE" | "PAUSE" | "DIRECT RESPONSE",
-              "tone": "CALM · CURIOUS" | "CALM" | "CURIOUS" | "WARM" | "NEUTRAL" | "DIRECT" | "ASSERTIVE" | "DIPLOMATIC" | "EMPATHETIC" | "CAUTIOUS" | "SKEPTICAL" | "PROFESSIONAL" | "URGENT" | "DE-ESCALATING",
-              "confidence": 84,
+              "recommended_strategy": "COGNITIVE PROBE" | "MIRRORING" | "PIVOT" | "BONDING" | "CLARIFY" | "CONFRONT" | "VALIDATE" | "CHALLENGE" | "DE-ESCALATE" | "ASSERTIVE" | "DIRECT RESPONSE",
+              "tone": "CALM · CURIOUS" | "CALM" | "CURIOUS" | "WARM" | "NEUTRAL" | "DIRECT" | "ASSERTIVE" | "DIPLOMATIC" | "EMPATHETIC" | "PROFESSIONAL",
+              "confidence": 85,
               "suggested_response": "Exact words the user should speak right now.",
               "reason": "Tactical justification for this response.",
               "alternatives": [
@@ -126,25 +143,22 @@ class LiveCopilotEngine(
                 "acoustic": 0.40
               },
               "deception_signal": {
-                "score": 73,
-                "is_elevated": true,
+                "score": 25,
+                "is_elevated": false,
                 "contributors": [
-                  {"label": "Linguistic distancing", "delta": 18},
-                  {"label": "Statement inconsistency", "delta": 31},
-                  {"label": "Uncertainty", "delta": 12},
-                  {"label": "Context mismatch", "delta": 12}
+                  {"label": "Linguistic markers", "delta": 10}
                 ],
-                "why": "Current statement differs from a previous statement."
+                "why": "Linguistic flow assessment."
               },
               "inconsistency": {
-                "detected": true,
-                "previous": "I started the project in March.",
-                "current": "I started the project in May.",
-                "confidence": 87
+                "detected": false,
+                "previous": "",
+                "current": "",
+                "confidence": 0
               },
               "memory_candidate": {
-                "detected": true,
-                "statement": "Sarah says she is moving in October.",
+                "detected": false,
+                "statement": "",
                 "suggested_state": "OBSERVED"
               }
             }
@@ -200,8 +214,8 @@ class LiveCopilotEngine(
                 ?: ToneType.CALM_CURIOUS
 
             val confidence = json.optInt("confidence", 84)
-            val response = json.optString("suggested_response", "Can you help me understand what changed?")
-            val reason = json.optString("reason", "Clarifies discrepancy without creating defensive resistance.")
+            val response = json.optString("suggested_response", "Can you tell me more about that?")
+            val reason = json.optString("reason", "Maintains conversational flow.")
 
             val altArray = json.optJSONArray("alternatives")
             val alternatives = mutableListOf<StrategyAlternative>()
@@ -251,7 +265,7 @@ class LiveCopilotEngine(
                 score = decScore,
                 isElevated = decScore >= 50,
                 contributors = decContribs,
-                whyExplanation = decObj?.optString("why", "Analysis derived from linguistic markers.") ?: ""
+                whyExplanation = decObj?.optString("why", "Analysis derived from speech markers.") ?: ""
             )
 
             val incObj = json.optJSONObject("inconsistency")
@@ -291,7 +305,7 @@ class LiveCopilotEngine(
         }
     }
 
-    private fun evaluateDeterministicCopilot(
+    private fun evaluateDynamicLinguisticCopilot(
         caller: PersonEntity?,
         transcriptHistory: List<TranscriptSegment>,
         latest: TranscriptSegment?,
@@ -299,243 +313,118 @@ class LiveCopilotEngine(
         knownMemories: List<MemoryEntity>,
         objective: String
     ): CopilotAnalysisResult {
-        val text = latest?.text?.lowercase() ?: ""
-        val speaker = latest?.speaker ?: Speaker.OTHER
+        val rawText = latest?.text ?: ""
+        val textLower = rawText.lowercase()
 
-        // Scenario 1: Sarah "I never said the meeting was Friday" or timeline/date discrepancy
-        if (text.contains("never said") || text.contains("friday") || text.contains("meeting was friday")) {
-            return CopilotAnalysisResult(
-                recommendedStrategy = StrategyType.COGNITIVE_PROBE,
-                tone = ToneType.CALM_CURIOUS,
-                confidence = 84,
-                suggestedResponse = "Can you help me understand what changed?",
-                reason = "Gently invites clarification on the schedule without creating defensiveness.",
-                alternatives = listOf(
-                    StrategyAlternative(
-                        StrategyType.MIRRORING,
-                        "\"The meeting was never Friday?\"",
-                        ToneType.CALM
-                    ),
-                    StrategyAlternative(
-                        StrategyType.PIVOT,
-                        "What target delivery date works best for the project launch?",
-                        ToneType.DIPLOMATIC
-                    ),
-                    StrategyAlternative(
-                        StrategyType.BONDING,
-                        "I know deadlines have been shifting with the current workload, let's realign.",
-                        ToneType.WARM
+        // 1. Linguistic markers calculation
+        val hedgeWords = listOf("maybe", "i think", "probably", "sort of", "kind of", "honestly", "to be honest", "as far as i know")
+        val hedgeCount = hedgeWords.count { textLower.contains(it) }
+
+        val negationWords = listOf("never", "didn't", "did not", "wasn't", "was not", "cannot", "can't", "won't", "no way")
+        val negationCount = negationWords.count { textLower.contains(it) }
+
+        val isQuestion = rawText.endsWith("?") || textLower.startsWith("what") || textLower.startsWith("how") || textLower.startsWith("why") || textLower.startsWith("when") || textLower.startsWith("who")
+
+        // 2. Check for real Inconsistency against known claims in DB
+        var detectedInconsistency: InconsistencyAlert? = null
+        for (claim in knownClaims) {
+            if (claim.currentStatement.isNotBlank()) {
+                val claimKeywords = claim.currentStatement.lowercase().split(" ").filter { it.length > 3 }
+                val matchCount = claimKeywords.count { textLower.contains(it) }
+                if (matchCount >= 2 && negationCount > 0) {
+                    detectedInconsistency = InconsistencyAlert(
+                        previousStatement = claim.currentStatement,
+                        currentStatement = rawText,
+                        confidence = 82,
+                        context = "Discrepancy with previously recorded claim"
                     )
-                ),
-                liveSignals = LiveSignalMeters(
-                    linguisticPosition = 0.22f,
-                    factualPosition = 0.78f,
-                    acousticPosition = 0.45f
-                ),
-                deceptionSignal = DeceptionSignalState(
-                    score = 73,
-                    isElevated = true,
-                    label = "EXPERIMENTAL SIGNAL",
-                    disclaimer = "REQUIRES HUMAN INTERPRETATION",
-                    contributors = listOf(
-                        DeceptionContributor("Linguistic distancing", 18),
-                        DeceptionContributor("Statement inconsistency", 31),
-                        DeceptionContributor("Uncertainty", 12),
-                        DeceptionContributor("Context mismatch", 12)
-                    ),
-                    whyExplanation = "Current statement differs from a previous statement recorded in commitment history."
-                ),
-                inconsistencyAlert = InconsistencyAlert(
-                    previousStatement = "Friday document delivery agreed on Aug 12",
-                    currentStatement = "I never said the meeting was Friday",
-                    confidence = 88,
-                    context = "Schedule commitment discrepancy"
-                ),
-                memoryCandidateAlert = null
+                    break
+                }
+            }
+        }
+
+        // 3. Check for potential Memory candidate
+        var memoryAlert: MemoryCandidateAlert? = null
+        val memoryTriggers = listOf("i will", "i promise", "moving to", "relocating", "budget is", "my target is", "we agreed", "deadline is")
+        if (memoryTriggers.any { textLower.contains(it) }) {
+            memoryAlert = MemoryCandidateAlert(
+                statement = "${caller?.name ?: "Speaker"}: \"$rawText\"",
+                suggestedState = "OBSERVED",
+                provenance = "Live Audio Stream"
             )
         }
 
-        // Scenario 2: Claim timeline inconsistency ("May" vs "March")
-        if (text.contains("started the project in may") || text.contains("in may") || text.contains("started in may")) {
-            return CopilotAnalysisResult(
-                recommendedStrategy = StrategyType.CLARIFY,
-                tone = ToneType.CALM,
-                confidence = 89,
-                suggestedResponse = "Earlier we noted the kickoff commenced in March—did the official sprint start in May?",
-                reason = "Validates the discrepancy between previous March record and current May assertion.",
-                alternatives = listOf(
-                    StrategyAlternative(
-                        StrategyType.COGNITIVE_PROBE,
-                        "Can you walk me through the milestones between March and May?",
-                        ToneType.CURIOUS
-                    ),
-                    StrategyAlternative(
-                        StrategyType.MIRRORING,
-                        "\"Started in May?\"",
-                        ToneType.CALM
-                    ),
-                    StrategyAlternative(
-                        StrategyType.PIVOT,
-                        "Regardless of start date, what is the completion estimate?",
-                        ToneType.DIRECT
-                    )
-                ),
-                liveSignals = LiveSignalMeters(
-                    linguisticPosition = 0.35f,
-                    factualPosition = 0.85f,
-                    acousticPosition = 0.30f
-                ),
-                deceptionSignal = DeceptionSignalState(
-                    score = 68,
-                    isElevated = true,
-                    contributors = listOf(
-                        DeceptionContributor("Statement inconsistency", 38),
-                        DeceptionContributor("Timeline variance", 18),
-                        DeceptionContributor("Context mismatch", 12)
-                    ),
-                    whyExplanation = "Current assertion (May kickoff) contradicts prior statement (March kickoff)."
-                ),
-                inconsistencyAlert = InconsistencyAlert(
-                    previousStatement = "March",
-                    currentStatement = "May",
-                    confidence = 87,
-                    context = "Kickoff timeline variance"
-                ),
-                memoryCandidateAlert = null
-            )
+        // 4. Calculate Deception / Stress score
+        val deceptionScore = ((hedgeCount * 14) + (negationCount * 18) + (if (detectedInconsistency != null) 35 else 0)).coerceIn(10, 88)
+        val isElevated = deceptionScore >= 50
+
+        val contributors = mutableListOf<DeceptionContributor>()
+        if (hedgeCount > 0) contributors.add(DeceptionContributor("Hedging / Uncertainty", hedgeCount * 14))
+        if (negationCount > 0) contributors.add(DeceptionContributor("Strong Negation", negationCount * 18))
+        if (detectedInconsistency != null) contributors.add(DeceptionContributor("Claim Variance", 35))
+        if (contributors.isEmpty()) contributors.add(DeceptionContributor("Conversational baseline", 10))
+
+        val deceptionState = DeceptionSignalState(
+            score = deceptionScore,
+            isElevated = isElevated,
+            contributors = contributors,
+            whyExplanation = if (isElevated) "Elevated linguistic qualifiers and negation detected." else "Speech metrics match normal conversation baseline."
+        )
+
+        // 5. Formulate tactical response
+        val strategy: StrategyType
+        val tone: ToneType
+        val suggestedResponse: String
+        val reason: String
+
+        if (detectedInconsistency != null) {
+            strategy = StrategyType.CLARIFY
+            tone = ToneType.CALM_CURIOUS
+            suggestedResponse = "Can you help me understand how that aligns with our earlier baseline?"
+            reason = "Addresses statement variance neutrally without creating defensiveness."
+        } else if (isQuestion) {
+            strategy = StrategyType.DIRECT_RESPONSE
+            tone = ToneType.DIRECT
+            suggestedResponse = "From our perspective, the key priority is achieving the objective cleanly."
+            reason = "Directly satisfies the inquiry while anchoring to core priorities."
+        } else if (rawText.length > 25) {
+            strategy = StrategyType.MIRRORING
+            tone = ToneType.CALM
+            val mirrorPhrase = rawText.split(" ").takeLast(4).joinToString(" ")
+            suggestedResponse = "\"$mirrorPhrase?\""
+            reason = "Mirrors recent phrasing to encourage speaker elaboration."
+        } else {
+            strategy = StrategyType.COGNITIVE_PROBE
+            tone = ToneType.CURIOUS
+            suggestedResponse = "What would be the most effective next milestone from your perspective?"
+            reason = "Prompts strategic input and keeps dialogue moving forward."
         }
 
-        // Scenario 3: Memory extraction ("moving in October" or relocation)
-        if (text.contains("moving") || text.contains("october") || text.contains("relocating")) {
-            return CopilotAnalysisResult(
-                recommendedStrategy = StrategyType.BONDING,
-                tone = ToneType.WARM,
-                confidence = 92,
-                suggestedResponse = "That's a major milestone—will the October move impact the Q4 release schedule?",
-                reason = "Acknowledges personal milestone while smoothly maintaining awareness of project timeline.",
-                alternatives = listOf(
-                    StrategyAlternative(
-                        StrategyType.VALIDATE,
-                        "Moving is always stressful, let us know how we can support.",
-                        ToneType.EMPATHETIC
-                    ),
-                    StrategyAlternative(
-                        StrategyType.PIVOT,
-                        "Let's make sure all deliverables are locked in before the relocation window.",
-                        ToneType.PROFESSIONAL
-                    )
-                ),
-                liveSignals = LiveSignalMeters(
-                    linguisticPosition = 0.15f,
-                    factualPosition = 0.20f,
-                    acousticPosition = 0.18f
-                ),
-                deceptionSignal = DeceptionSignalState(
-                    score = 14,
-                    isElevated = false,
-                    contributors = listOf(
-                        DeceptionContributor("Baseline authenticity", 5),
-                        DeceptionContributor("Personal disclosure", 9)
-                    ),
-                    whyExplanation = "Open personal disclosure with consistent tone."
-                ),
-                inconsistencyAlert = null,
-                memoryCandidateAlert = MemoryCandidateAlert(
-                    statement = "${caller?.name ?: "Contact"} says she is moving in October.",
-                    suggestedState = "OBSERVED",
-                    provenance = "Active Live Call"
-                )
-            )
-        }
+        val alternatives = listOf(
+            StrategyAlternative(StrategyType.COGNITIVE_PROBE, "What specific factor is driving that priority?", ToneType.CURIOUS),
+            StrategyAlternative(StrategyType.PIVOT, "Let's focus on the concrete deliverables for this sprint.", ToneType.DIPLOMATIC),
+            StrategyAlternative(StrategyType.BONDING, "I completely understand where you're coming from.", ToneType.WARM)
+        )
 
-        // Scenario 4: Investor / Valuation / Term Sheet discussion
-        if (text.contains("valuation") || text.contains("term sheet") || text.contains("board seat") || text.contains("investor")) {
-            return CopilotAnalysisResult(
-                recommendedStrategy = StrategyType.ASSERTIVE,
-                tone = ToneType.DIPLOMATIC,
-                confidence = 86,
-                suggestedResponse = "We're structured to align board representation with capital deployment tranches.",
-                reason = "Positions terms firmly while anchoring governance to capital investment.",
-                alternatives = listOf(
-                    StrategyAlternative(
-                        StrategyType.COGNITIVE_PROBE,
-                        "What specific governance concerns is your investment committee prioritizing?",
-                        ToneType.CURIOUS
-                    ),
-                    StrategyAlternative(
-                        StrategyType.MIRRORING,
-                        "\"A mandatory board seat?\"",
-                        ToneType.CALM
-                    ),
-                    StrategyAlternative(
-                        StrategyType.PIVOT,
-                        "Let's focus on milestone velocity for the next funding tranche.",
-                        ToneType.DIRECT
-                    )
-                ),
-                liveSignals = LiveSignalMeters(
-                    linguisticPosition = 0.28f,
-                    factualPosition = 0.42f,
-                    acousticPosition = 0.35f
-                ),
-                deceptionSignal = DeceptionSignalState(
-                    score = 24,
-                    isElevated = false,
-                    contributors = listOf(
-                        DeceptionContributor("Commercial negotiation", 14),
-                        DeceptionContributor("Strategic positioning", 10)
-                    ),
-                    whyExplanation = "Standard negotiation posture detected."
-                ),
-                inconsistencyAlert = null,
-                memoryCandidateAlert = null
-            )
-        }
-
-        // Default active copilot
         return CopilotAnalysisResult(
-            recommendedStrategy = StrategyType.MIRRORING,
-            tone = ToneType.CALM_CURIOUS,
+            recommendedStrategy = strategy,
+            tone = tone,
             confidence = 82,
-            suggestedResponse = if (text.isNotBlank()) "\"${text.take(40)}...\"" else "Understood. How would you prioritize the immediate next steps?",
-            reason = "Maintains conversational flow and encourages speaker elaboration.",
-            alternatives = listOf(
-                StrategyAlternative(
-                    StrategyType.COGNITIVE_PROBE,
-                    "What led you to that conclusion?",
-                    ToneType.CURIOUS
-                ),
-                StrategyAlternative(
-                    StrategyType.PIVOT,
-                    "Let's review the primary objective for this week.",
-                    ToneType.DIRECT
-                ),
-                StrategyAlternative(
-                    StrategyType.BONDING,
-                    "I appreciate you sharing that context.",
-                    ToneType.WARM
-                )
-            ),
+            suggestedResponse = suggestedResponse,
+            reason = reason,
+            alternatives = alternatives,
             liveSignals = LiveSignalMeters(
-                linguisticPosition = 0.20f,
-                factualPosition = 0.30f,
-                acousticPosition = 0.25f
+                linguisticPosition = (hedgeCount * 0.2f).coerceIn(0.1f, 0.9f),
+                factualPosition = if (detectedInconsistency != null) 0.85f else 0.25f,
+                acousticPosition = 0.35f
             ),
-            deceptionSignal = DeceptionSignalState(
-                score = 21,
-                isElevated = false,
-                contributors = listOf(
-                    DeceptionContributor("Conversational baseline", 12),
-                    DeceptionContributor("Linguistic stability", 9)
-                ),
-                whyExplanation = "Linguistic markers and acoustic signals align with baseline expectations."
-            ),
-            inconsistencyAlert = null,
-            memoryCandidateAlert = null
+            deceptionSignal = deceptionState,
+            inconsistencyAlert = detectedInconsistency,
+            memoryCandidateAlert = memoryAlert
         )
     }
 
-    private fun defaultPassiveResult(name: String): CopilotAnalysisResult {
+    private fun defaultPassiveResult(): CopilotAnalysisResult {
         return CopilotAnalysisResult(
             recommendedStrategy = StrategyType.DIRECT_RESPONSE,
             tone = ToneType.NEUTRAL,
@@ -553,9 +442,5 @@ class LiveCopilotEngine(
             inconsistencyAlert = null,
             memoryCandidateAlert = null
         )
-    }
-
-    companion object {
-        private const val TAG = "LiveCopilotEngine"
     }
 }

@@ -45,14 +45,25 @@ import com.example.ui.theme.RealityEngineTextMuted
 import com.example.ui.theme.RealityEngineTextPrimary
 import com.example.ui.theme.RealityEngineTextSecondary
 
+import com.example.telecom.CallState
+
 @Composable
 fun OutgoingCallScreen(
     caller: PersonEntity?,
     phoneNumber: String,
+    callState: CallState = CallState.CONNECTING,
+    rawStatus: String? = null,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val callerName = caller?.name ?: phoneNumber
+    val statusText = when {
+        !rawStatus.isNullOrBlank() -> rawStatus.replace("-", " ").uppercase()
+        callState == CallState.RINGING -> "RINGING..."
+        callState == CallState.CONNECTING -> "CONNECTING..."
+        callState == CallState.ACTIVE -> "ACTIVE"
+        else -> "DIALING..."
+    }
 
     Column(
         modifier = modifier
@@ -86,7 +97,7 @@ fun OutgoingCallScreen(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "CALLING",
+                text = "OUTGOING CALL",
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 2.sp,
@@ -134,7 +145,7 @@ fun OutgoingCallScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Connecting...",
+                text = statusText,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     color = RealityEngineCyan,
