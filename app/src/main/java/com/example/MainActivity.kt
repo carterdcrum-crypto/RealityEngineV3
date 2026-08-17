@@ -34,7 +34,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -61,7 +60,6 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SignalsScreen
 import com.example.ui.theme.RealityEngineAmber
 import com.example.ui.theme.RealityEngineBorder
-import com.example.ui.theme.RealityEngineCyan
 import com.example.ui.theme.RealityEngineDarkBg
 import com.example.ui.theme.RealityEngineSurface
 import com.example.ui.theme.RealityEngineSurfaceElevated
@@ -73,16 +71,30 @@ class MainActivity : ComponentActivity() {
     private var pendingTelNumber: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        StartupCrashReporter.install(this)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleIntent(intent)
+
+        val previousCrash = StartupCrashReporter.getLastReport(this)
+        if (previousCrash != null) {
+            setContent {
+                RealityEngineTheme {
+                    CrashDiagnosticsScreen(
+                        report = previousCrash,
+                        onDismiss = { StartupCrashReporter.clear(this); recreate() }
+                    )
+                }
+            }
+            return
+        }
+
         setContent {
             RealityEngineTheme {
                 val viewModel: RealityEngineViewModel = viewModel()
                 val context = LocalContext.current
                 val activity = context as? Activity
 
-                // RoleManager result launcher for requesting default dialer role
                 val defaultDialerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) {
@@ -95,31 +107,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Handle intent dial requests
                 pendingTelNumber?.let { number ->
                     viewModel.clearDialer()
                     number.forEach { viewModel.appendDialDigit(it.toString()) }
                     pendingTelNumber = null
                 }
 
-                // Refresh default phone status on lifecycle resume
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner) {
                     val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            viewModel.refreshDefaultPhoneStatus()
-                        }
+                        if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshDefaultPhoneStatus()
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner.lifecycle.removeObserver(observer)
-                    }
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
-                RealityEngineApp(
-                    viewModel = viewModel,
-                    onRequestDefaultPhone = onRequestDefaultPhone
-                )
+                RealityEngineApp(viewModel = viewModel, onRequestDefaultPhone = onRequestDefaultPhone)
             }
         }
     }
@@ -133,179 +136,85 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         val data: Uri? = intent.data
-        if (data != null && data.scheme == "tel") {
-            pendingTelNumber = data.schemeSpecificPart
+        if (data != null && data.scheme == "tel") pendingTelNumber = data.schemeSpecificPart
+    }
+}
+
+@Composable
+private fun CrashDiagnosticsScreen(report: String, onDismiss: () -> Unit) {
+    androidx.compose.foundation.layout.Column(
+        modifier = Modifier.fillMaxSize().background(RealityEngineDarkBg).padding(20.dp)
+    ) {
+        Text("REALITY ENGINE", color = RealityEngineAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text("STARTUP FAILURE", color = RealityEngineTextPrimary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+        Text("The previous launch crashed. Send this report to the developer.", color = RealityEngineTextMuted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp))
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(report, color = RealityEngineTextPrimary, fontFamily = FontFamily.Monospace, fontSize = 10.sp, modifier = Modifier.fillMaxWidth().weight(1f))
+        }
+        androidx.compose.material3.Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            Text("CLEAR REPORT & RETRY")
         }
     }
 }
 
 @Composable
-fun RealityEngineApp(
-    viewModel: RealityEngineViewModel,
-    onRequestDefaultPhone: () -> Unit
-) {
+fun RealityEngineApp(viewModel: RealityEngineViewModel, onRequestDefaultPhone: () -> Unit) {
     val callScreenState by viewModel.callScreenState.collectAsState()
     val activeCall by viewModel.activeCall.collectAsState()
     val postCallSummary by viewModel.postCallSummary.collectAsState()
     val isSettingsOpen by viewModel.isSettingsOpen.collectAsState()
     val currentTab by viewModel.currentTab.collectAsState()
 
-    // 1. Full Screen Active Call Experiences
     when (callScreenState) {
-        CallScreenState.INCOMING -> {
-            IncomingCallScreen(
-                caller = activeCall.caller,
-                phoneNumber = activeCall.phoneNumber,
-                onAnswer = { viewModel.answerIncomingCall() },
-                onDecline = { viewModel.declineIncomingCall() }
-            )
-            return
-        }
-        CallScreenState.DIALING -> {
-            OutgoingCallScreen(
-                caller = activeCall.caller,
-                phoneNumber = activeCall.phoneNumber,
-                callState = activeCall.callState,
-                rawStatus = activeCall.rawTwilioStatus,
-                onEndCall = { viewModel.declineIncomingCall() }
-            )
-            return
-        }
-        CallScreenState.ACTIVE -> {
-            ActiveCallScreen(viewModel = viewModel)
-            return
-        }
+        CallScreenState.INCOMING -> { IncomingCallScreen(activeCall.caller, activeCall.phoneNumber, { viewModel.answerIncomingCall() }, { viewModel.declineIncomingCall() }); return }
+        CallScreenState.DIALING -> { OutgoingCallScreen(activeCall.caller, activeCall.phoneNumber, activeCall.callState, activeCall.rawTwilioStatus, { viewModel.declineIncomingCall() }); return }
+        CallScreenState.ACTIVE -> { ActiveCallScreen(viewModel); return }
         CallScreenState.SUMMARY -> {
-            if (postCallSummary != null) {
-                PostCallSummaryScreen(
-                    initialSummary = postCallSummary!!,
-                    onSave = { updated -> viewModel.saveCallSummaryAndFinish(updated) },
-                    onDiscard = { viewModel.discardSummaryAndFinish() }
-                )
-                return
-            }
+            if (postCallSummary != null) { PostCallSummaryScreen(postCallSummary!!, { viewModel.saveCallSummaryAndFinish(it) }, { viewModel.discardSummaryAndFinish() }); return }
         }
-        CallScreenState.IDLE -> { /* Proceed to main app scaffold */ }
+        CallScreenState.IDLE -> Unit
     }
 
-    // 2. Settings Screen Overlay
     if (isSettingsOpen) {
-        SettingsScreen(
-            viewModel = viewModel,
-            onRequestDefaultPhone = onRequestDefaultPhone,
-            onBack = { viewModel.openSettings(false) }
-        )
+        SettingsScreen(viewModel, onRequestDefaultPhone, { viewModel.openSettings(false) })
         return
     }
 
-    // 3. Main Phone Application Layout
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = RealityEngineDarkBg,
-        bottomBar = {
-            RealityEngineBottomBar(
-                currentTab = currentTab,
-                onTabSelected = { viewModel.setTab(it) }
-            )
-        }
+        modifier = Modifier.fillMaxSize(), containerColor = RealityEngineDarkBg,
+        bottomBar = { RealityEngineBottomBar(currentTab) { viewModel.setTab(it) } }
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
             when (currentTab) {
-                AppNavTab.CALL -> DialerScreen(
-                    viewModel = viewModel,
-                    onRequestDefaultPhone = onRequestDefaultPhone
-                )
-                AppNavTab.PEOPLE -> PeopleScreen(viewModel = viewModel)
-                AppNavTab.MEMORY -> MemoryScreen(viewModel = viewModel)
-                AppNavTab.SIGNALS -> SignalsScreen(viewModel = viewModel)
+                AppNavTab.CALL -> DialerScreen(viewModel, onRequestDefaultPhone)
+                AppNavTab.PEOPLE -> PeopleScreen(viewModel)
+                AppNavTab.MEMORY -> MemoryScreen(viewModel)
+                AppNavTab.SIGNALS -> SignalsScreen(viewModel)
             }
         }
     }
 }
 
 @Composable
-fun RealityEngineBottomBar(
-    currentTab: AppNavTab,
-    onTabSelected: (AppNavTab) -> Unit
-) {
+fun RealityEngineBottomBar(currentTab: AppNavTab, onTabSelected: (AppNavTab) -> Unit) {
     NavigationBar(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, RealityEngineBorder, RoundedCornerShape(0.dp)),
-        containerColor = RealityEngineSurface,
-        contentColor = RealityEngineTextPrimary,
-        tonalElevation = 0.dp
+        modifier = Modifier.fillMaxWidth().border(1.dp, RealityEngineBorder, RoundedCornerShape(0.dp)),
+        containerColor = RealityEngineSurface, contentColor = RealityEngineTextPrimary, tonalElevation = 0.dp
     ) {
-        NavigationItem(
-            tab = AppNavTab.CALL,
-            label = "PHONE",
-            icon = Icons.Default.Dialpad,
-            isSelected = currentTab == AppNavTab.CALL,
-            onClick = { onTabSelected(AppNavTab.CALL) }
-        )
-        NavigationItem(
-            tab = AppNavTab.PEOPLE,
-            label = "PEOPLE",
-            icon = Icons.Default.People,
-            isSelected = currentTab == AppNavTab.PEOPLE,
-            onClick = { onTabSelected(AppNavTab.PEOPLE) }
-        )
-        NavigationItem(
-            tab = AppNavTab.MEMORY,
-            label = "MEMORY",
-            icon = Icons.Default.Memory,
-            isSelected = currentTab == AppNavTab.MEMORY,
-            onClick = { onTabSelected(AppNavTab.MEMORY) }
-        )
-        NavigationItem(
-            tab = AppNavTab.SIGNALS,
-            label = "SIGNALS",
-            icon = Icons.Default.GraphicEq,
-            isSelected = currentTab == AppNavTab.SIGNALS,
-            onClick = { onTabSelected(AppNavTab.SIGNALS) }
-        )
+        NavigationItem(AppNavTab.CALL, "PHONE", Icons.Default.Dialpad, currentTab == AppNavTab.CALL) { onTabSelected(AppNavTab.CALL) }
+        NavigationItem(AppNavTab.PEOPLE, "PEOPLE", Icons.Default.People, currentTab == AppNavTab.PEOPLE) { onTabSelected(AppNavTab.PEOPLE) }
+        NavigationItem(AppNavTab.MEMORY, "MEMORY", Icons.Default.Memory, currentTab == AppNavTab.MEMORY) { onTabSelected(AppNavTab.MEMORY) }
+        NavigationItem(AppNavTab.SIGNALS, "SIGNALS", Icons.Default.GraphicEq, currentTab == AppNavTab.SIGNALS) { onTabSelected(AppNavTab.SIGNALS) }
     }
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.NavigationItem(
-    tab: AppNavTab,
-    label: String,
-    icon: ImageVector,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
+private fun androidx.compose.foundation.layout.RowScope.NavigationItem(tab: AppNavTab, label: String, icon: ImageVector, isSelected: Boolean, onClick: () -> Unit) {
     NavigationBarItem(
-        selected = isSelected,
-        onClick = onClick,
-        icon = {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                modifier = Modifier.size(20.dp),
-                tint = if (isSelected) RealityEngineAmber else RealityEngineTextMuted
-            )
-        },
-        label = {
-            Text(
-                text = label,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) RealityEngineAmber else RealityEngineTextMuted
-            )
-        },
-        colors = NavigationBarItemDefaults.colors(
-            selectedIconColor = RealityEngineAmber,
-            selectedTextColor = RealityEngineAmber,
-            unselectedIconColor = RealityEngineTextMuted,
-            unselectedTextColor = RealityEngineTextMuted,
-            indicatorColor = RealityEngineSurfaceElevated
-        ),
+        selected = isSelected, onClick = onClick,
+        icon = { Icon(icon, label, Modifier.size(20.dp), tint = if (isSelected) RealityEngineAmber else RealityEngineTextMuted) },
+        label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) RealityEngineAmber else RealityEngineTextMuted) },
+        colors = NavigationBarItemDefaults.colors(selectedIconColor = RealityEngineAmber, selectedTextColor = RealityEngineAmber, unselectedIconColor = RealityEngineTextMuted, unselectedTextColor = RealityEngineTextMuted, indicatorColor = RealityEngineSurfaceElevated),
         modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
     )
 }
