@@ -27,14 +27,18 @@ object StartupCrashReporter {
                     append("Thread: ").append(thread.name).append('\n\n")
                     append(throwable.stackTraceToString().take(12000))
                 }
-                appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().putString(KEY_REPORT, report).apply()
+                saveReport(appContext, report)
             } catch (_: Throwable) {
                 // Never interfere with Android's normal crash handling.
             } finally {
                 previous?.uncaughtException(thread, throwable)
             }
         }
+    }
+
+    fun saveReport(context: Context, report: String) {
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_REPORT, report).apply()
     }
 
     fun getLastReport(context: Context): String? =
