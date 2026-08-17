@@ -19,6 +19,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
     <application
+        android:name=".RealityEngineApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -27,6 +28,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <activity
+            android:name=".StartupDiagnosticActivity"
+            android:exported="false"
+            android:label="Reality Engine Diagnostics"
+            android:theme="@style/Theme.MyApplication" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -40,8 +46,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Default Dialer Action Filters -->
             <intent-filter>
                 <action android:name="android.intent.action.DIAL" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -60,7 +64,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Primary CallService (InCallService & Foreground Phone Call Service) -->
         <service
             android:name=".telecom.CallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
@@ -71,6 +74,4 @@
             </intent-filter>
         </service>
     </application>
-
-
 </manifest>
