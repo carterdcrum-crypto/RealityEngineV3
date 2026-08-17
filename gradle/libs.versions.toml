@@ -1,5 +1,5 @@
 [versions]
-agp = "9.1.1"
+agp = "8.8.2"
 coreKtx = "1.18.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -44,10 +44,8 @@ googleid = "1.1.1"
 securityCrypto = "1.1.0-alpha06"
 twilioVoice = "6.5.0"
 
-
 [libraries]
 twilio-voice = { group = "com.twilio", name = "voice-android", version.ref = "twilioVoice" }
-
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
@@ -102,7 +100,6 @@ androidx-credentials = { group = "androidx.credentials", name = "credentials", v
 androidx-credentials-play-services = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
-
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
