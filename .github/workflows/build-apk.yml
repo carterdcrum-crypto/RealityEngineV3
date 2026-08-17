@@ -20,19 +20,13 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Make Gradlew Executable
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-          fi
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
-      - name: Build Debug APK with Gradle Wrapper
-        run: |
-          if [ -f "./gradlew" ]; then
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+      - name: Build Debug APK
+        run: gradle --version && gradle assembleDebug --stacktrace --no-daemon
 
       - name: Verify APK was produced
         run: |
@@ -42,7 +36,7 @@ jobs:
             exit 1
           fi
           echo "Found $APK_COUNT APK file(s):"
-          find app/build/outputs/apk/debug -name "*.apk"
+          find app/build/outputs/apk/debug -name "*.apk" -print
 
       - name: Upload RealityEngineV3 Debug APK
         uses: actions/upload-artifact@v4
